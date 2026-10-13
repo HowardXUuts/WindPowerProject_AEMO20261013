@@ -9,7 +9,6 @@ Repository layout, design decisions, and build order. No implementation yet.
 ├── .github/
 │   └── workflows/
 │       ├── ingest.yml              # hourly: fetch both feeds → bronze → commit
-│       ├── compact.yml             # daily: roll closed hour files into day files
 │       ├── registry.yml            # weekly: refresh wind DUID registry, open PR on change
 │       ├── tests.yml               # CI: ruff + pytest on every push and PR
 │       └── pages.yml               # build and deploy the dashboard
@@ -47,9 +46,9 @@ Repository layout, design decisions, and build order. No implementation yet.
 │   │   └── wind_duids.meta.json    # source, retrieval date, row count
 │   ├── bronze/
 │   │   ├── scada/_ingested.txt     # watermark, one source file name per line
-│   │   ├── scada/date=YYYY-MM-DD/  # one parquet per source file, write-once
+│   │   ├── scada/date=YYYY-MM-DD/  # hour=HH.parquet, write-once
 │   │   ├── price/_ingested.txt
-│   │   └── price/date=YYYY-MM-DD/
+│   │   └── price/date=YYYY-MM-DD/  # hour=HH.parquet
 │   ├── silver/date=YYYY-MM-DD.parquet
 │   └── gold/*.parquet
 │
@@ -132,10 +131,33 @@ files, produces one bronze file, and makes one commit. That is 24 commits a day
 instead of 288, well inside the free tier, and the data is at most an hour
 behind. Latency is not what this project is demonstrating.
 
-**Daily compaction.** 24 hour-files a day is 8,760 files a year, which makes
-checkouts slow. Once a day has closed, its hour files are merged into a single
-`day.parquet` and deleted. That is one rewrite per day rather than per run, and
-holds the file count to about 365 a year per layer.
+**One Parquet file per closed hour, and no compaction.** Measured on live
+cardinality (517 DUIDs, 5 regions), the three candidate grains cost:
+
+| Grain | Size/year | Files/year | Rewrites |
+|-------|-----------|------------|----------|
+| per 5-min interval | 702 MB | 210,240 | none |
+| **per hour** | **293 MB** | **17,520** | **none** |
+| per day | 227 MB | 730 | one per run |
+
+Hour files cost 58% less than interval files because the Parquet footer and the
+DUID dictionary are paid once an hour instead of 288 times a day. Daily files
+are smaller still, but only reachable by rewriting the day file on every run,
+which costs about 2.5 GB a year of superseded blobs — worse than either
+alternative — or by running once a day and risking permanent loss against
+AEMO's two-day retention.
+
+Compaction was the original plan and is now explicitly rejected: merging small
+files into large ones leaves *both* permanently in git history, so it always
+costs more than writing at the right grain in the first place. The lever is
+choosing the grain, not cleaning up afterwards.
+
+**An hour is written only once it is closed, and only in full.** AEMO having
+published an interval in a later hour is what proves no further file can land
+in this one; the clock is never consulted, because a late or early run would
+then corrupt the boundary. A partial hour is never written, since the rest of
+it arriving would force exactly the rewrite this design exists to avoid. The
+`limit` input therefore rounds down to whole hours.
 
 **Idempotency through a manifest.** `data/_state/manifest.parquet` records every
 source file that has been ingested, with its size and row count. Each run lists
@@ -209,9 +231,9 @@ inspected.
 15. `ingest.yml`: hourly cron at :07, both ingesters, commit with `[skip ci]`,
     concurrency group so runs cannot overlap, rebase-and-retry on a push race. ✓
 16. `tests.yml`: ruff and pytest on Python 3.11 for every push and PR. ✓
-17. `compact.yml`: daily compaction of closed days.
-18. A one-off backfill run to seed history from whatever `Current/` holds, plus a
-    note on extending it from AEMO's archive.
+17. A one-off backfill run to seed history from whatever `Current/` holds
+    (~576 intervals, about 48 hour files per source), plus a note on extending
+    it from AEMO's archive.
 
 **Phase 6 — Dashboard**
 18. Export JSON slices from gold; build the page (fleet output, per-farm

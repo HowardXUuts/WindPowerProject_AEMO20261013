@@ -292,11 +292,15 @@ def bronze_ddl(spec: ReportSpec) -> str:
     return "CREATE OR REPLACE TABLE bronze_rows (" + ", ".join(columns) + ")"
 
 
-def bronze_path(spec: ReportSpec, source_file: str, bronze_dir: Path = BRONZE_DIR) -> Path:
-    """Return the Parquet path for a source file, partitioned by NEM date."""
-    interval = interval_from_filename(spec, source_file)
-    partition = f"date={interval.date().isoformat()}"
-    return bronze_dir / spec.key / partition / f"{Path(source_file).stem}.parquet"
+def hour_of(moment: datetime) -> datetime:
+    """Truncate a NEM-time instant to the start of its hour."""
+    return moment.replace(minute=0, second=0, microsecond=0)
+
+
+def bronze_path(spec: ReportSpec, hour: datetime, bronze_dir: Path = BRONZE_DIR) -> Path:
+    """Return the Parquet path for one closed NEM hour."""
+    partition = f"date={hour.date().isoformat()}"
+    return bronze_dir / spec.key / partition / f"hour={hour:%H}.parquet"
 
 
 def write_bronze(spec: ReportSpec, rows: list[tuple], destination: Path) -> int:
@@ -319,16 +323,19 @@ def write_bronze(spec: ReportSpec, rows: list[tuple], destination: Path) -> int:
     return len(rows)
 
 
-def ingest_payload(
+def ingest_hour(
     spec: ReportSpec,
-    payload: bytes,
-    source_file: str,
+    hour: datetime,
+    payloads: list[tuple[str, bytes]],
     bronze_dir: Path = BRONZE_DIR,
 ) -> tuple[Path, int]:
-    """Parse one downloaded archive and write its bronze Parquet file."""
-    text = read_zip_payload(payload, source_file)
-    rows = extract_rows(spec, text, source_file)
-    destination = bronze_path(spec, source_file, bronze_dir)
+    """Parse one closed hour's archives and write a single Parquet file."""
+    rows: list[tuple] = []
+    for source_file, payload in payloads:
+        text = read_zip_payload(payload, source_file)
+        rows.extend(extract_rows(spec, text, source_file))
+
+    destination = bronze_path(spec, hour, bronze_dir)
     return destination, write_bronze(spec, rows, destination)
 
 
@@ -337,18 +344,57 @@ def ingest_payload(
 # ---------------------------------------------------------------------------
 
 
-def pending_files(
-    spec: ReportSpec,
-    available: list[str],
-    ingested: set[str],
-    limit: int | None = None,
-) -> list[str]:
+def pending_files(spec: ReportSpec, available: list[str], ingested: set[str]) -> list[str]:
     """Return the files not yet ingested, oldest interval first."""
-    outstanding = sorted(
+    return sorted(
         set(available) - ingested,
         key=lambda name: interval_from_filename(spec, name),
     )
-    return outstanding[:limit] if limit else outstanding
+
+
+def group_by_hour(spec: ReportSpec, names: list[str]) -> dict[datetime, list[str]]:
+    """Group source file names by the NEM hour their interval falls in."""
+    groups: dict[datetime, list[str]] = {}
+    for name in names:
+        groups.setdefault(hour_of(interval_from_filename(spec, name)), []).append(name)
+    return {hour: sorted(files) for hour, files in sorted(groups.items())}
+
+
+def select_closed_hours(
+    spec: ReportSpec,
+    pending: list[str],
+    available: list[str],
+    limit: int | None = None,
+) -> list[tuple[datetime, list[str]]]:
+    """Return whole, closed hours to ingest, oldest first.
+
+    An hour is closed once AEMO has published an interval in a later hour, so
+    no further file can land in it. Only closed hours are written, and always
+    in full: a half-written hour would have to be rewritten when the rest
+    arrived, and rewriting is what makes a committed-data repository grow
+    without bound. The clock is never consulted — the listing itself says how
+    far AEMO has got.
+
+    ``limit`` caps the number of source files, rounded down to whole hours, so
+    a cap can never split an hour across two runs. One hour is always returned
+    if any is ready, even when it holds more files than the limit.
+    """
+    if not pending:
+        return []
+
+    latest = max(interval_from_filename(spec, name) for name in available)
+    selected: list[tuple[datetime, list[str]]] = []
+    taken = 0
+
+    for hour, files in group_by_hour(spec, pending).items():
+        if hour >= hour_of(latest):
+            break  # the hour AEMO is still publishing into
+        if limit is not None and selected and taken + len(files) > limit:
+            break
+        selected.append((hour, files))
+        taken += len(files)
+
+    return selected
 
 
 def run(
@@ -357,7 +403,7 @@ def run(
     list_only: bool = False,
     bronze_dir: Path = BRONZE_DIR,
 ) -> int:
-    """Ingest all pending files for a report and return the number ingested."""
+    """Ingest all closed, un-ingested hours. Returns the number of hours written."""
     watermark = watermark_path(spec, bronze_dir)
     ingested = load_watermark(watermark)
     LOG.info("[%s] watermark holds %d previously ingested files", spec.key, len(ingested))
@@ -365,33 +411,57 @@ def run(
     headers = {"User-Agent": USER_AGENT}
     with httpx.Client(timeout=HTTP_TIMEOUT, headers=headers, follow_redirects=True) as client:
         available = list_remote_files(spec, client)
-        LOG.info("[%s] AEMO directory lists %d files", spec.key, len(available))
+        pending = pending_files(spec, available, ingested)
+        hours = select_closed_hours(spec, pending, available, limit)
+        LOG.info(
+            "[%s] %d listed, %d pending, %d closed hours selected",
+            spec.key,
+            len(available),
+            len(pending),
+            len(hours),
+        )
 
-        outstanding = pending_files(spec, available, ingested, limit)
         if list_only:
-            for name in outstanding:
-                print(name)
+            for hour, files in hours:
+                print(f"{hour:%Y-%m-%d %H}:00  {len(files)} files")
             return 0
-        if not outstanding:
+        if not hours:
             LOG.info("[%s] nothing to ingest", spec.key)
             return 0
 
-        LOG.info("[%s] ingesting %d files", spec.key, len(outstanding))
         done: list[str] = []
         total_rows = 0
-        for name in outstanding:
-            try:
-                payload = download(spec, client, name)
-                destination, count = ingest_payload(spec, payload, name, bronze_dir)
-            except (httpx.HTTPError, ParseError, zipfile.BadZipFile) as exc:
-                # One bad file must not abort the run. The watermark is not
-                # advanced for it, so the next run retries it.
-                LOG.warning("[%s] skipping %s: %s", spec.key, name, exc)
+        written = 0
+        for hour, files in hours:
+            destination = bronze_path(spec, hour, bronze_dir)
+            if destination.exists():
+                # Write-once: an existing file means this hour is already done.
+                LOG.warning("[%s] %s exists, skipping", spec.key, destination.name)
+                done.extend(files)
                 continue
-            LOG.debug("[%s] wrote %s (%d rows)", spec.key, destination.name, count)
-            done.append(name)
+
+            payloads: list[tuple[str, bytes]] = []
+            try:
+                for name in files:
+                    payloads.append((name, download(spec, client, name)))
+                _, count = ingest_hour(spec, hour, payloads, bronze_dir)
+            except (httpx.HTTPError, ParseError, zipfile.BadZipFile) as exc:
+                # Leave the whole hour un-watermarked so the next run retries it
+                # in full, rather than committing a partial hour.
+                LOG.warning("[%s] skipping hour %s: %s", spec.key, f"{hour:%Y-%m-%d %H}", exc)
+                continue
+
+            LOG.info(
+                "[%s] wrote %s from %d files (%d rows)",
+                spec.key,
+                destination.relative_to(bronze_dir),
+                len(files),
+                count,
+            )
+            done.extend(files)
             total_rows += count
+            written += 1
 
     append_watermark(done, watermark)
-    LOG.info("[%s] ingested %d files, %d rows", spec.key, len(done), total_rows)
-    return len(done)
+    LOG.info("[%s] wrote %d hours, %d files, %d rows", spec.key, written, len(done), total_rows)
+    return written

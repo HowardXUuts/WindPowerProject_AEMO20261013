@@ -4,12 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       limit:
-        description: "Max files per source (blank = all pending)"
+        description: "Max source files per run, rounded down to whole hours (blank = all)"
         required: false
         default: "12"
   schedule:
-    # Hourly at :07. One run picks up the twelve five-minute files published in
-    # the previous hour and makes a single commit, instead of 288 a day.
+    # Hourly at :07. One run picks up the twelve five-minute files of the hour
+    # AEMO has just finished publishing, and writes them as a single Parquet
+    # file: 24 immutable files a day rather than 288, and no rewrites ever.
     # Scheduled runs are best-effort and often late; the watermark backfills
     # whatever was missed, so a skipped run is self-healing.
     - cron: "7 * * * *"
@@ -59,14 +60,18 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          if git diff --quiet --exit-code -- data/bronze; then
+          # Stage first, then inspect the index. Bronze files are always new,
+          # and `git diff` on the worktree ignores untracked paths entirely —
+          # it reported "no changes" and dropped a successful ingest.
+          git add -A data/bronze
+          if git diff --cached --quiet -- data/bronze; then
             echo "No new bronze files."
             exit 0
           fi
 
-          git add data/bronze
-          scada=$(git diff --cached --name-only -- 'data/bronze/scada/**/*.parquet' | wc -l)
-          price=$(git diff --cached --name-only -- 'data/bronze/price/**/*.parquet' | wc -l)
+          scada=$(git diff --cached --name-only -- data/bronze/scada | grep -c '\.parquet$' || true)
+          price=$(git diff --cached --name-only -- data/bronze/price | grep -c '\.parquet$' || true)
+          echo "Committing ${scada} scada and ${price} price files."
           git commit -m "data: bronze ingest (${scada} scada, ${price} price) [skip ci]"
 
           # Another run may have landed while this one was downloading. Rebase
