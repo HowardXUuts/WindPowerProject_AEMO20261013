@@ -254,7 +254,11 @@ inspected.
 16. `tests.yml`: ruff and pytest on Python 3.11 for every push and PR. ✓
 17. A one-off backfill run to seed history from whatever `Current/` holds
     (~576 intervals, about 48 hour files per source), plus a note on extending
-    it from AEMO's archive.
+    it from AEMO's archive. ✓
+18. `transform` job in `ingest.yml`: silver → quality → gold after every
+    ingest, gated so a hard quality failure stops gold without losing silver.
+    `pages.yml` chains off the ingest workflow finishing, because the data
+    commits carry `[skip ci]` and would otherwise suppress it. ✓
 
 **Phase 6 — Dashboard** — *done*
 18. `scripts/export_dashboard.py` + `sql/dashboard/`: seven JSON slices from

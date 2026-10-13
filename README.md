@@ -63,6 +63,26 @@ gold. The Q&A assistant is next.
 See [`PLAN.md`](PLAN.md) for the repository layout, design decisions, and build
 steps.
 
+## Running it yourself
+
+The pipeline needs two repository settings that cannot be set from a workflow:
+
+- **Settings → Actions → General**: allow all actions, and give workflows
+  **read and write** permissions, so the hourly ingest can commit data back.
+- **Settings → Pages → Build and deployment → Source: GitHub Actions**, before
+  the first dashboard deploy. The automatic token can deploy to a Pages site but
+  cannot create one, so this is a one-time manual step.
+
+Locally:
+
+```bash
+python3.11 -m venv .venv && source .venv/bin/activate
+pip install '.[dev,reference]'
+pytest -q                                    # 178 tests, no network needed
+python scripts/export_dashboard.py           # gold -> docs/data/*.json
+python -m http.server 8000 --directory docs  # then open localhost:8000
+```
+
 ## Background
 
 Built by a data engineer and former wind turbine maintenance engineer, as a

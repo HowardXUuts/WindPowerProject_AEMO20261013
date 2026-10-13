@@ -5,6 +5,15 @@ name: Deploy dashboard
 # gold and would otherwise be a second copy of the same numbers in git history,
 # able to disagree with the tables they came from.
 on:
+  # The pipeline's own gold commits carry [skip ci], which suppresses every
+  # workflow for that push — including this one. So the scheduled path is
+  # chained off the ingest workflow finishing rather than off the commit it
+  # made: workflow_run is not suppressed by [skip ci].
+  workflow_run:
+    workflows: ["Ingest AEMO bronze"]
+    types: [completed]
+  # Still deploy on a human push that changes the page or the slices, where
+  # there is no [skip ci] to get in the way.
   push:
     branches: [main]
     paths:
@@ -31,6 +40,18 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          # workflow_run checks out the default branch, but at the SHA the
+          # triggering workflow started from. Fetch enough to move to the
+          # commits it made.
+          fetch-depth: 10
+
+      - name: Take the gold the pipeline just committed
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git reset --hard origin/main
+          echo "at $(git rev-parse --short HEAD): $(git log -1 --pretty=%s)"
 
       - uses: actions/setup-python@v5
         with:
@@ -49,13 +70,17 @@ jobs:
           ls -la docs/data
           echo "total: $(du -sh docs | cut -f1)"
 
+      # Pages must already be enabled on the repository, once, by hand:
+      # Settings -> Pages -> Build and deployment -> Source -> GitHub Actions.
+      #
+      # This cannot be automated from here. The enablement: true input asks the
+      # action to create the site, but the automatic GITHUB_TOKEN is refused:
+      # "Create Pages site failed. Error: Resource not accessible by
+      # integration". pages: write permits deploying to a site that exists; it
+      # does not permit creating one, which needs admin rights the workflow
+      # token does not carry. Leaving the input off gives the clearer of the
+      # two errors, which names the setting to change.
       - uses: actions/configure-pages@v5
-        with:
-          # Provision the Pages site on first run instead of requiring someone
-          # to flip Settings -> Pages -> Source by hand. Without this the very
-          # first deploy fails with "Get Pages site failed ... Not Found", which
-          # looks like a broken workflow rather than an unset repository option.
-          enablement: true
 
       - uses: actions/upload-pages-artifact@v3
         with:
