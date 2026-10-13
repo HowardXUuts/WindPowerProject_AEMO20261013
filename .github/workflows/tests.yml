@@ -1,0 +1,37 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install --disable-pip-version-check '.[dev]'
+
+      - name: Lint
+        run: ruff check scripts tests
+
+      - name: Test
+        # Network-marked tests are deselected by pyproject's addopts; the suite
+        # runs entirely against fixtures.
+        run: pytest -q

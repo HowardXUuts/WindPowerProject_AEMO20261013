@@ -5,9 +5,12 @@ Guidance for Claude Code when working in this repository.
 ## What this project is
 
 An end-to-end Australian wind generation data platform, built as a portfolio
-piece. It ingests AEMO's public 5-minute dispatch SCADA data, keeps only wind
-farm units, and refines it through bronze / silver / gold Parquet layers. A
-static dashboard and a Claude-powered Q&A assistant sit on top.
+piece. It ingests two AEMO 5-minute feeds — dispatch SCADA (MW per unit) and
+dispatch price (RRP per region) — keeps only wind farm units from silver
+onward, and refines them through bronze / silver / gold Parquet layers. Joining
+output to price is what turns generation volume into revenue, capture price and
+negative-price exposure. A static dashboard and a Claude-powered Q&A assistant
+sit on top.
 
 The author is a data engineer (ADF, Synapse, Databricks medallion) with a prior
 career as a wind turbine maintenance engineer, moving into AI engineering. The
@@ -15,9 +18,10 @@ repo should read as production-minded work, not a notebook dump.
 
 ## Goals
 
-1. Reliable, idempotent ingestion of AEMO DISPATCH_SCADA on a schedule.
+1. Reliable, idempotent ingestion of AEMO DISPATCHSCADA and DISPATCHIS on a
+   schedule.
 2. A clean medallion architecture that someone can follow end to end.
-3. Small repo: wind DUIDs only from bronze onward, immutable hour-level files.
+3. Small repo: wind DUIDs only from silver onward, write-once bronze files.
 4. A static dashboard on GitHub Pages, built from the gold layer.
 5. A Q&A assistant that answers questions over gold tables via the Claude API.
 
@@ -34,8 +38,8 @@ repo should read as production-minded work, not a notebook dump.
 
 | Layer  | Content | Committed | Grain |
 |--------|---------|-----------|-------|
-| raw    | Downloaded `PUBLIC_DISPATCHSCADA_*.zip` | No (gitignored) | per 5-min file |
-| bronze | All DUIDs, source columns unchanged | Yes | one file per source file |
+| raw    | Downloaded `PUBLIC_*.zip` | No (gitignored) | per 5-min file |
+| bronze | All DUIDs and regions, source columns unchanged | Yes | one file per source file |
 | silver | Wind only. Typed, deduplicated, validated, UTC + NEM local time | Yes | one file per day |
 | gold   | Aggregates and dashboard-ready tables | Yes | whole-table rewrite |
 
@@ -48,10 +52,13 @@ Rules that follow from this:
   rewritten file is a new blob in git history forever, and a file rewritten
   every run makes the repository grow without bound. Gold is small enough
   (hundreds of KB) to rewrite in full each run.
-- Every write is idempotent and keyed off a watermark: bronze uses
-  `data/bronze/_ingested.txt`, one source file name per line, appended only
-  after a successful Parquet write. Re-running a job must not duplicate rows or
-  change existing files.
+- Every write is idempotent and keyed off a watermark: each source keeps its
+  own at `data/bronze/<source>/_ingested.txt`, one file name per line, appended
+  only after a successful Parquet write. Re-running a job must not duplicate
+  rows or change existing files.
+- Sources are independent. `scada` failing must never block `price`, and vice
+  versa — AEMO retains only about two days, so a blocked source loses data
+  permanently.
 
 ## Conventions
 
@@ -68,7 +75,9 @@ Rules that follow from this:
   network `@pytest.mark.network` and keep it out of the default run.
 - Formatting and linting with `ruff`. Line length 100.
 - Module layout: one responsibility per module, no cross-layer imports
-  (`gold.py` must not import `bronze.py`).
+  (`gold.py` must not import `bronze.py`). Adding a NEMWeb report means
+  declaring a `ReportSpec` in its own `scripts/ingest_*.py`, never editing
+  `scripts/nemweb.py` with report-specific branching.
 - Log with `logging`, not `print`, in anything that runs in a workflow.
 
 ## Security

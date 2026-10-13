@@ -4,9 +4,10 @@ A serverless data platform for Australian wind generation, built on AEMO's
 public market data.
 
 Every five minutes AEMO publishes the metered output of every generating unit in
-the National Electricity Market. This project collects that feed, keeps the wind
-farms, and refines it into a queryable history of Australian wind generation —
-then puts a dashboard and a natural-language Q&A assistant on top of it.
+the National Electricity Market, and the spot price each region is settled at.
+This project collects both feeds, keeps the wind farms, and refines them into a
+queryable history of Australian wind generation *and what it earned* — then puts
+a dashboard and a natural-language Q&A assistant on top of it.
 
 The whole thing runs on GitHub Actions and stores its data in this repository.
 No cloud account, no database server, no paid services.
@@ -14,19 +15,19 @@ No cloud account, no database server, no paid services.
 ## Architecture
 
 ```
-nemweb.com.au  ──▶  raw zips  ──▶  bronze  ──▶  silver  ──▶  gold  ──▶  dashboard
- DISPATCH_SCADA     transient      wind only    typed &      aggregates   (Pages)
- every 5 min        (not kept)     per hour     validated    & metrics        │
-                                                                              ▼
-                                                                     Q&A assistant
-                                                                      (Claude API)
+ Dispatch_SCADA  ─┐                                                   dashboard
+  MW per DUID    │                                                     (Pages)
+                 ├─▶ raw zips ──▶ bronze ──▶ silver ──▶ gold ──▶      │
+ DispatchIS      │   transient     write-once   wind only   joined        ▼
+  $/MWh per      ┘   (not kept)    per file     typed &     volume   Q&A assistant
+  region                                         validated   x price  (Claude API)
 ```
 
 | Layer | What it holds |
 |-------|---------------|
-| **bronze** | Wind DUIDs only, source columns untouched. One Parquet file per UTC hour. |
-| **silver** | Typed, deduplicated, validated. UTC and NEM local time. One file per day. |
-| **gold** | Aggregates: generation by farm, by state, capacity factors, daily and monthly rollups. |
+| **bronze** | Both feeds as published, every DUID and region. One Parquet file per source file, never rewritten. |
+| **silver** | Wind only. Typed, deduplicated, validated. UTC and NEM local time. One file per day. |
+| **gold** | Aggregates: generation by farm and state, capacity factors, revenue, capture price, negative-price exposure. |
 
 ## Stack
 
@@ -34,9 +35,16 @@ Python 3.11 · DuckDB · Parquet · GitHub Actions · GitHub Pages · Claude API
 
 ## Data source
 
-[AEMO NEMWeb Dispatch SCADA](https://nemweb.com.au/Reports/Current/Dispatch_SCADA/)
-— `PUBLIC_DISPATCHSCADA_*.zip`, published every 5 minutes, containing MW output
-per DUID (dispatchable unit identifier). Public and unauthenticated.
+Two public, unauthenticated NEMWeb feeds, both published every 5 minutes:
+
+- [Dispatch SCADA](https://nemweb.com.au/Reports/Current/Dispatch_SCADA/) —
+  `PUBLIC_DISPATCHSCADA_*.zip`, MW output per DUID (dispatchable unit identifier).
+- [DispatchIS](https://nemweb.com.au/Reports/Current/DispatchIS_Reports/) —
+  `PUBLIC_DISPATCHIS_*.zip`, whose `DISPATCH_PRICE` table holds the regional
+  reference price (RRP, $/MWh) that generators are settled against.
+
+AEMO keeps only about two days in `Current/`, so ingestion runs hourly and
+backfills from a watermark rather than assuming every scheduled run fires.
 
 AEMO data is used under the terms of its
 [copyright permissions](https://aemo.com.au/privacy-and-legal-notices/copyright-permissions).
@@ -44,8 +52,9 @@ This project is not affiliated with AEMO.
 
 ## Status
 
-Bronze layer built and tested. See [`PLAN.md`](PLAN.md) for the repository layout,
-design decisions, and build steps.
+Bronze layer built and tested for both feeds, running hourly on GitHub Actions.
+Silver is next. See [`PLAN.md`](PLAN.md) for the repository layout, design
+decisions, and build steps.
 
 ## Background
 
