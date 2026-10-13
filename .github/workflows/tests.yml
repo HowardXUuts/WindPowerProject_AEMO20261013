@@ -26,7 +26,10 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: pip install --disable-pip-version-check '.[dev]'
+        # Includes the reference extras: without them the registry tests skip,
+        # and a skipped regression test protects nothing. The hourly ingest
+        # still installs plain '.', so the runtime stays lean.
+        run: pip install --disable-pip-version-check '.[dev,reference]'
 
       - name: Lint
         run: ruff check scripts tests
