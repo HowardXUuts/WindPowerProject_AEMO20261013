@@ -39,7 +39,7 @@ repo should read as production-minded work, not a notebook dump.
 | Layer  | Content | Committed | Grain |
 |--------|---------|-----------|-------|
 | raw    | Downloaded `PUBLIC_*.zip` | No (gitignored) | per 5-min file |
-| bronze | All DUIDs and regions, source columns unchanged | Yes | one file per source file |
+| bronze | All DUIDs and regions, source columns unchanged | Yes | one file per closed NEM hour |
 | silver | Wind only. Typed, deduplicated, validated, UTC + NEM local time | Yes | one file per day |
 | gold   | Aggregates and dashboard-ready tables | Yes | whole-table rewrite |
 
@@ -52,6 +52,17 @@ Rules that follow from this:
   rewritten file is a new blob in git history forever, and a file rewritten
   every run makes the repository grow without bound. Gold is small enough
   (hundreds of KB) to rewrite in full each run.
+- Bronze is written one file per closed NEM hour, never per five-minute
+  interval. Measured on live cardinality (517 DUIDs), hour files cost 293 MB
+  and 17,520 files a year against 702 MB and 210,240 — the Parquet footer and
+  the DUID dictionary are paid once an hour instead of 288 times a day.
+- An hour is closed only once AEMO has published an interval in a later hour,
+  and an hour is always written in full. Never write a partial hour: the rest
+  of it arriving would force a rewrite. Never consult the clock for this — the
+  directory listing says how far AEMO has got.
+- Do not add a compaction step. Merging small files into large ones leaves both
+  in git history permanently, so compacting after the fact always costs more
+  than writing at the right grain to begin with.
 - Every write is idempotent and keyed off a watermark: each source keeps its
   own at `data/bronze/<source>/_ingested.txt`, one file name per line, appended
   only after a successful Parquet write. Re-running a job must not duplicate

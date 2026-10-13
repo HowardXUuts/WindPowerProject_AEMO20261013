@@ -4,12 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       limit:
-        description: "Max files per source (blank = all pending)"
+        description: "Max source files per run, rounded down to whole hours (blank = all)"
         required: false
         default: "12"
   schedule:
-    # Hourly at :07. One run picks up the twelve five-minute files published in
-    # the previous hour and makes a single commit, instead of 288 a day.
+    # Hourly at :07. One run picks up the twelve five-minute files of the hour
+    # AEMO has just finished publishing, and writes them as a single Parquet
+    # file: 24 immutable files a day rather than 288, and no rewrites ever.
     # Scheduled runs are best-effort and often late; the watermark backfills
     # whatever was missed, so a skipped run is self-healing.
     - cron: "7 * * * *"

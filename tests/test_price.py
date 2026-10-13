@@ -5,7 +5,14 @@ from datetime import datetime
 import duckdb
 import pytest
 from ingest_price import PRICE
-from nemweb import NEM_TZ, ParseError, bronze_path, extract_rows, interval_from_filename
+from nemweb import (
+    NEM_TZ,
+    ParseError,
+    bronze_path,
+    extract_rows,
+    hour_of,
+    interval_from_filename,
+)
 
 SOURCE_FILE = "PUBLIC_DISPATCHIS_20261013000500_0000000123456789.zip"
 
@@ -65,8 +72,9 @@ def test_rejects_a_report_without_the_price_table():
 
 
 def test_price_and_scada_land_in_separate_bronze_trees(tmp_path):
-    path = bronze_path(PRICE, SOURCE_FILE, tmp_path)
-    assert path.relative_to(tmp_path).parts[:2] == ("price", "date=2026-10-13")
+    hour = hour_of(interval_from_filename(PRICE, SOURCE_FILE))
+    path = bronze_path(PRICE, hour, tmp_path)
+    assert path.relative_to(tmp_path).parts == ("price", "date=2026-10-13", "hour=00.parquet")
 
 
 def test_interval_from_filename_rejects_the_other_report():
