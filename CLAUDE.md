@@ -31,8 +31,10 @@ repo should read as production-minded work, not a notebook dump.
 - Runtime is GitHub Actions free tier only. No Azure, no paid services, no
   always-on compute, no external database.
 - Data is committed back into this repository. Treat repo size as a hard budget.
-- Dependencies: keep the list short. `duckdb`, `httpx`, `pandas` only where
-  DuckDB genuinely cannot do the job. Ask before adding anything else.
+- Dependencies: keep the list short. The runtime pipeline is `duckdb` and
+  `httpx` only. Spreadsheet parsing for the reference registry lives in the
+  `reference` extra (`pandas`, `openpyxl`, `xlrd`, `python-calamine`), which the
+  hourly ingest never installs. Ask before adding anything else.
 
 ## Layer contract
 

@@ -9,7 +9,7 @@ Repository layout, design decisions, and build order. No implementation yet.
 ├── .github/
 │   └── workflows/
 │       ├── ingest.yml              # hourly: fetch both feeds → bronze → commit
-│       ├── registry.yml            # weekly: refresh wind DUID registry, open PR on change
+│       ├── reference.yml           # manual: refresh the wind DUID registry
 │       ├── tests.yml               # CI: ruff + pytest on every push and PR
 │       └── pages.yml               # build and deploy the dashboard
 │
@@ -200,9 +200,13 @@ inspected.
 3. `config.py`: paths, NEM timezone, layer schemas, size budget constants.
 4. `tests.yml` running ruff and pytest, so CI is green before any logic exists.
 
-**Phase 1 — Reference data**
-5. Build `data/reference/wind_duids.csv` from the AEMO registration list.
-6. `registry.py` to load it with validation, plus the refresh-and-diff workflow.
+**Phase 1 — Reference data** — *script and workflow done, CSV pending a run*
+5. `scripts/refresh_reference.py`: download the NEM Registration and Exemption
+   List, locate the generator sheet and header row by name, filter to wind, and
+   write `wind_duids.csv` plus a provenance sidecar. ✓
+6. `reference.yml`: manual dispatch, since the list changes only on
+   registration or retirement and a new DUID deserves a human look. ✓
+7. Load-with-validation helper for the silver join.
 
 **Phase 2 — Ingestion and bronze** — *done, see `scripts/`*
 7. List the AEMO directory, parse file names to interval timestamps, download
