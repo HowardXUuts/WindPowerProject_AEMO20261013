@@ -1,0 +1,86 @@
+# CLAUDE.md
+
+Guidance for Claude Code when working in this repository.
+
+## What this project is
+
+An end-to-end Australian wind generation data platform, built as a portfolio
+piece. It ingests AEMO's public 5-minute dispatch SCADA data, keeps only wind
+farm units, and refines it through bronze / silver / gold Parquet layers. A
+static dashboard and a Claude-powered Q&A assistant sit on top.
+
+The author is a data engineer (ADF, Synapse, Databricks medallion) with a prior
+career as a wind turbine maintenance engineer, moving into AI engineering. The
+repo should read as production-minded work, not a notebook dump.
+
+## Goals
+
+1. Reliable, idempotent ingestion of AEMO DISPATCH_SCADA on a schedule.
+2. A clean medallion architecture that someone can follow end to end.
+3. Small repo: wind DUIDs only from bronze onward, immutable hour-level files.
+4. A static dashboard on GitHub Pages, built from the gold layer.
+5. A Q&A assistant that answers questions over gold tables via the Claude API.
+
+## Stack and constraints
+
+- Python 3.11. DuckDB for all SQL and Parquet I/O. Parquet + zstd on disk.
+- Runtime is GitHub Actions free tier only. No Azure, no paid services, no
+  always-on compute, no external database.
+- Data is committed back into this repository. Treat repo size as a hard budget.
+- Dependencies: keep the list short. `duckdb`, `httpx`, `pandas` only where
+  DuckDB genuinely cannot do the job. Ask before adding anything else.
+
+## Layer contract
+
+| Layer  | Content | Committed | Grain |
+|--------|---------|-----------|-------|
+| raw    | Downloaded `PUBLIC_DISPATCHSCADA_*.zip` | No (gitignored) | per 5-min file |
+| bronze | Wind DUIDs only, source columns unchanged | Yes | one file per UTC hour |
+| silver | Typed, deduplicated, validated, UTC + NEM local time | Yes | one file per day |
+| gold   | Aggregates and dashboard-ready tables | Yes | whole-table rewrite |
+
+Rules that follow from this:
+
+- Filter to wind DUIDs at the bronze write. Nothing downstream ever sees a
+  non-wind unit.
+- Bronze and silver files are immutable once their period has closed. Never
+  rewrite a closed file — a rewritten file is a new blob in git history forever.
+  Gold is small enough to rewrite in full each run.
+- Every write is idempotent and keyed off the ingestion manifest in
+  `data/_state/`. Re-running a job must not duplicate rows or change outputs.
+
+## Conventions
+
+- Type hints on every function signature, including return types. Prefer
+  `pathlib.Path` over `str` for paths, and `datetime` with explicit tzinfo —
+  never a naive datetime.
+- Comments are concise and explain *why*. No comment that restates the code, no
+  decorative banners. Docstrings on public functions, one line unless the
+  behaviour is genuinely subtle.
+- Business logic that is naturally SQL lives in `sql/`, loaded and executed by
+  thin Python wrappers. Do not hand-roll in pandas what DuckDB can express.
+- Tests use `pytest`. Unit tests run against small fixtures checked into
+  `tests/fixtures/`, never against the network. Mark anything that needs
+  network `@pytest.mark.network` and keep it out of the default run.
+- Formatting and linting with `ruff`. Line length 100.
+- Module layout: one responsibility per module, no cross-layer imports
+  (`gold.py` must not import `bronze.py`).
+- Log with `logging`, not `print`, in anything that runs in a workflow.
+
+## Security
+
+- Never commit secrets, API keys, or tokens. The only secret in this project is
+  `ANTHROPIC_API_KEY`, which lives in GitHub Actions secrets and is read from
+  the environment at runtime.
+- Never add a credential to a workflow file, a config file, a test fixture, or a
+  commit message. If something is needed locally, it goes in `.env`, which is
+  gitignored.
+- AEMO data is public and unauthenticated. Nothing in this pipeline should ever
+  need an outbound credential except the Claude API call.
+
+## Working style
+
+- Keep changes scoped to what was asked. No speculative abstraction.
+- Before adding a dependency, a workflow, or a new data layer, say what it buys
+  and what it costs in repo size or runtime minutes.
+- When touching ingestion, state the effect on git history growth.

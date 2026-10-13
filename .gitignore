@@ -1,0 +1,30 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Transient raw downloads — never committed (see PLAN.md)
+data/raw/
+*.zip
+*.CSV
+
+# DuckDB working files
+*.duckdb
+*.duckdb.wal
+*.db
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
