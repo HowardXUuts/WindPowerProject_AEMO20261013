@@ -1,6 +1,7 @@
 # Plan
 
-Repository layout, design decisions, and build order. No implementation yet.
+Repository layout, design decisions, and build order. Sections 1 and 2 describe
+the repository as built; section 3 marks what is done and what remains.
 
 ## 1. Repository structure
 
@@ -13,22 +14,16 @@ Repository layout, design decisions, and build order. No implementation yet.
 │       ├── tests.yml               # CI: ruff + pytest on every push and PR
 │       └── pages.yml               # build and deploy the dashboard
 │
-├── src/aemo_wind/
-│   ├── __init__.py
-│   ├── config.py                   # paths, timezones, schedule constants, size budgets
-│   ├── sources/
-│   │   └── nemweb.py               # list directory, download zip, unpack to CSV
-│   ├── state.py                    # ingestion manifest: what has been processed
-│   ├── bronze.py                   # CSV → wind-filtered Parquet, one file per UTC hour
-│   ├── silver.py                   # typed, deduplicated, validated, day-partitioned
-│   ├── gold.py                     # run the gold SQL, write aggregate tables
-│   ├── compact.py                  # merge closed hour files into a day file
-│   ├── quality.py                  # data quality checks and the quality report table
-│   ├── registry.py                 # wind DUID registry: load, refresh, diff
-│   └── cli.py                      # `python -m aemo_wind <command>`
+├── scripts/
+│   ├── nemweb.py                   # shared: list, download, parse, watermark, write
+│   ├── cli.py                      # shared argparse entry point
+│   ├── ingest_scada.py             # ReportSpec: Dispatch_SCADA → bronze/scada
+│   ├── ingest_price.py             # ReportSpec: DispatchIS   → bronze/price
+│   ├── refresh_reference.py        # wind DUID registry from the AEMO list
+│   ├── build_silver.py             # wind filter, typing, dedup, validation
+│   └── build_gold.py               # run the gold SQL, write aggregate tables
 │
 ├── sql/
-│   ├── bronze/select_wind.sql
 │   ├── silver/normalise.sql
 │   ├── silver/quality_checks.sql
 │   └── gold/
@@ -42,8 +37,8 @@ Repository layout, design decisions, and build order. No implementation yet.
 │
 ├── data/
 │   ├── reference/
-│   │   ├── wind_duids.csv          # DUID → farm name, state, region, capacity MW
-│   │   └── wind_duids.meta.json    # source, retrieval date, row count
+│   │   ├── wind_duids.csv          # DUID → station, region, fuel, capacity, in_scada
+│   │   └── wind_duids.meta.json    # source, retrieval date, counts, exclusions
 │   ├── bronze/
 │   │   ├── scada/_ingested.txt     # watermark, one source file name per line
 │   │   ├── scada/date=YYYY-MM-DD/  # hour=HH.parquet, write-once
@@ -63,12 +58,12 @@ Repository layout, design decisions, and build order. No implementation yet.
 │   └── qa.py                       # NL question → DuckDB SQL → answer
 │
 ├── tests/
-│   ├── fixtures/                   # a few real zips and CSVs, trimmed
-│   ├── test_nemweb.py
-│   ├── test_bronze.py
-│   ├── test_silver.py
-│   ├── test_gold.py
-│   └── test_state.py
+│   ├── fixtures/                   # trimmed AEMO CSVs, committed
+│   ├── test_parser.py              # C/I/D nested-CSV parsing
+│   ├── test_bronze.py              # hour selection, writes, watermark
+│   ├── test_listing.py             # directory listing and file names
+│   ├── test_price.py               # DISPATCH_PRICE specifics
+│   └── test_reference.py           # wind DUID registry
 │
 ├── CLAUDE.md
 ├── README.md
@@ -88,7 +83,7 @@ rather than framework-specific code.
 
 **Raw zips are never committed.** They are downloaded into the runner's
 workspace, parsed, and discarded. AEMO's `Current/` directory only retains about
-two days of files, so the manifest plus the bronze layer is the durable record.
+two days of files, so the watermark plus the bronze layer is the durable record.
 
 **Wind filtering happens at the silver boundary, not in bronze.** Bronze keeps
 every DUID exactly as published, so it stays replayable when the wind DUID
@@ -96,9 +91,9 @@ registry changes — a new farm can be backfilled from existing bronze files
 instead of re-downloading from a directory that only retains two days. The cost
 is repo size: all ~500 DUIDs is roughly 150k rows per day against 23k for wind
 alone, or very roughly 150 MB a year of committed Parquet rather than 35 MB.
-That is affordable, and daily compaction plus zstd keeps it in check. If history
-growth becomes the binding constraint, moving the filter into the bronze write is
-the lever to pull.
+That is affordable at the hour grain below, and if history growth ever becomes
+the binding constraint, moving the filter into the bronze write is the lever to
+pull.
 
 **Spot price is ingested alongside generation, not instead of it.** Generation
 alone measures volume. Joined to the regional reference price it measures
@@ -159,20 +154,29 @@ then corrupt the boundary. A partial hour is never written, since the rest of
 it arriving would force exactly the rewrite this design exists to avoid. The
 `limit` input therefore rounds down to whole hours.
 
-**Idempotency through a manifest.** `data/_state/manifest.parquet` records every
-source file that has been ingested, with its size and row count. Each run lists
-the AEMO directory, subtracts what the manifest already has, and processes the
-difference. This makes re-runs safe and automatically backfills gaps from a
+**Idempotency through a watermark.** `data/bronze/<source>/_ingested.txt` holds
+one source file name per line, appended only after the Parquet write succeeds.
+Each run lists the AEMO directory, subtracts what the watermark already has, and
+processes the difference. This makes re-runs safe and automatically backfills gaps from a
 failed or skipped run — which will happen, because GitHub's scheduled runs are
 not guaranteed to fire on time.
 
-**The DUID registry is checked in, not scraped at runtime.** Wind farm metadata
-(name, state, region, registered capacity) comes from AEMO's NEM Registration
-and Exemption List, which is an Excel file published irregularly. Scraping it on
-every run would be fragile and slow. Instead it lives in
-`data/reference/wind_duids.csv`, and a weekly workflow re-reads the source and
-opens a pull request if the DUID set has changed — so new wind farms get a human
-review rather than silently entering the pipeline.
+**The DUID registry is checked in, refreshed by hand.** Wind farm metadata
+comes from AEMO's NEM Registration and Exemption List, an Excel file published
+irregularly. Scraping it on every run would be fragile and slow, so it lives in
+`data/reference/wind_duids.csv` and `reference.yml` refreshes it on manual
+dispatch — a new DUID entering the pipeline gets a human look at the diff.
+
+Fuel source alone cannot identify a wind farm: AEMO files Hornsdale Power
+Reserve, a battery, under fuel source "Wind" because it sits beside the wind
+farm. The technology and dispatch type columns are what separate a turbine from
+a battery, and excluded units are named in the meta sidecar so the judgement is
+reviewable.
+
+The registry also carries `in_scada`, true when the DUID appears in committed
+bronze SCADA. Twelve registered wind farms are non-scheduled and never appear in
+DISPATCHSCADA at all; without the flag, quality checks cannot tell a
+non-scheduled unit from a genuine ingestion gap.
 
 **Capacity factor needs registered capacity**, which is why the registry is a
 dependency of the gold layer and not just a filter list.

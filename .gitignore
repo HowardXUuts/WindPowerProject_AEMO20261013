@@ -34,3 +34,6 @@ htmlcov/
 
 # Fixtures are data, not transient downloads
 !tests/fixtures/**
+
+# Build artifacts
+build/

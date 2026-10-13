@@ -22,6 +22,12 @@ reference = [
     "python-calamine>=0.2",
 ]
 
+[tool.setuptools]
+# Nothing here is an importable package: scripts/ is a script directory that
+# tests put on sys.path via conftest. Say so explicitly, or setuptools scans
+# the project root and refuses to choose between sql/, data/ and assistant/.
+py-modules = []
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"
