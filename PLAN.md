@@ -239,9 +239,14 @@ inspected.
     hard ones failing the run and soft ones warning, published to
     `data/gold/quality.parquet` for the dashboard. ✓
 
-**Phase 4 — Gold**
-13. The four gold SQL models, run by `gold.py` as a full rewrite.
-14. Tests asserting known totals against a fixed fixture day.
+**Phase 4 — Gold** — *done*
+15. Five gold models run by `scripts/build_gold.py` as a full rewrite:
+    `farm_daily`, `farm_revenue_daily`, `capture_price`, `region_hourly` and
+    `latest_snapshot`. ✓
+16. `latest_snapshot` reads silver plus the newest bronze hours, filtered to
+    wind in memory, so the dashboard is current even before a silver day
+    closes. ✓
+17. Tests asserting exact totals against a fixed fixture day. ✓
 
 **Phase 5 — Automation** — *ingest.yml and tests.yml done*
 15. `ingest.yml`: hourly cron at :07, both ingesters, commit with `[skip ci]`,
