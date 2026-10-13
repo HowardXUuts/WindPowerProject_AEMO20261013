@@ -1,0 +1,76 @@
+name: Refresh wind DUID registry
+
+# Manual only. The registration list changes when a generator is registered or
+# retired, not on a schedule, and a new DUID entering the pipeline deserves a
+# human look at the diff.
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "Registration list URL (blank = the published default)"
+        required: false
+        default: ""
+      inspect:
+        description: "Dump the workbook's sheets and header rows instead of writing"
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: refresh-reference
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install --disable-pip-version-check '.[reference]'
+
+      - name: Inspect the workbook
+        if: ${{ inputs.inspect }}
+        run: python scripts/refresh_reference.py --inspect ${URL:+--url "$URL"}
+        env:
+          URL: ${{ inputs.url }}
+
+      - name: Refresh the registry
+        if: ${{ !inputs.inspect }}
+        run: python scripts/refresh_reference.py ${URL:+--url "$URL"}
+        env:
+          URL: ${{ inputs.url }}
+
+      - name: Show what changed
+        if: ${{ !inputs.inspect }}
+        run: |
+          git --no-pager diff --stat -- data/reference || true
+          echo "--- first rows ---"
+          head -5 data/reference/wind_duids.csv
+
+      - name: Commit the registry
+        if: ${{ !inputs.inspect }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add -A data/reference
+          if git diff --cached --quiet -- data/reference; then
+            echo "Registry unchanged."
+            exit 0
+          fi
+
+          duids=$(( $(wc -l < data/reference/wind_duids.csv) - 1 ))
+          git commit -m "data: refresh wind DUID registry (${duids} wind DUIDs) [skip ci]"
+          git push

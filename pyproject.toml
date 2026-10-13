@@ -13,6 +13,14 @@ dev = [
     "pytest>=8.0",
     "ruff>=0.6",
 ]
+# Only for scripts/refresh_reference.py, which is run by hand a few times a
+# year. Kept out of the default install so the hourly ingest stays lean.
+reference = [
+    "pandas>=2.2",
+    "openpyxl>=3.1",
+    "xlrd>=2.0",
+    "python-calamine>=0.2",
+]
 
 [tool.ruff]
 line-length = 100
