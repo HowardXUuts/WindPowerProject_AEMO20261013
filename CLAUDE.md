@@ -10,7 +10,13 @@ dispatch price (RRP per region) — keeps only wind farm units from silver
 onward, and refines them through bronze / silver / gold Parquet layers. Joining
 output to price is what turns generation volume into revenue, capture price and
 negative-price exposure. A static dashboard and a Claude-powered Q&A assistant
-sit on top.
+sit on top, and a forecasting phase predicts regional price for a battery
+arbitrage backtest.
+
+The subjects of study are **wind farms and batteries**. Solar, coal, gas, hydro
+and everything else appear only as regional totals used as features — never
+modelled per unit, never broken out. The registry therefore classifies units
+rather than filtering to wind.
 
 The author is a data engineer (ADF, Synapse, Databricks medallion) with a prior
 career as a wind turbine maintenance engineer, moving into AI engineering. The
@@ -24,6 +30,9 @@ repo should read as production-minded work, not a notebook dump.
 3. Small repo: wind DUIDs only from silver onward, write-once bronze files.
 4. A static dashboard on GitHub Pages, built from the gold layer.
 5. A Q&A assistant that answers questions over gold tables via the Claude API.
+6. A regional price forecast (mean and spike probability over 60 and 120
+   minutes) evaluated against AEMO's own forecast, and a battery arbitrage
+   backtest that turns it into dollars.
 
 ## Stack and constraints
 
@@ -131,6 +140,50 @@ Rules that follow from this:
 - Data commits carry `[skip ci]`, which suppresses every workflow for that push.
   Anything that must run after a data commit chains off `workflow_run`, not off
   the push — that is why `pages.yml` watches the ingest workflow finishing.
+
+## Machine learning
+
+Planned, not built — see PLAN.md section 4. These rules apply the moment any
+of it exists.
+
+- The unit of prediction is (region, interval). Price is regional; wind and
+  battery output are features, never targets.
+- Mean price and spike probability are separate models. Price is heavy-tailed
+  enough that one model optimising mean absolute error learns to ignore the
+  spikes, which are the only intervals a battery is paid for.
+- Features are **derived, never committed**. A 50-column feature table costs
+  about 200 MB a year against 17 MB for the predictions, and it is reproducible
+  from silver by definition. Rebuild it in the workflow and gitignore it, as
+  `docs/data` already is. Model files are build artefacts, not data.
+- The `ml` extra (`scikit-learn`, `lightgbm`, `pandas`, `numpy`) is installed
+  by the ML workflow and nothing else. The hourly ingest keeps installing plain
+  `.`; these wheels are tens of megabytes.
+- Every model must be reported against persistence, same-time-yesterday and
+  AEMO's own `P5MIN` forecast, per fold, never only pooled. If it cannot beat
+  `P5MIN`, say so plainly — that is a finding, not a failure to hide.
+
+## Leakage rules
+
+A leaked feature produces a model that looks superb and earns nothing, so
+these are not negotiable:
+
+- A feature for interval `t` may use only data whose interval ends at or before
+  `t`, with one interval of slack for publication lag — data up to `t − 5 min`.
+- Forecasts are keyed by **issue time, never valid time**. Every forecast row
+  carries `issued_at`, and a feature may use it only where `issued_at <= t`.
+  Joining on valid time alone hands the model the answer.
+- Weather is admissible only from a forecast issued before `t`. Observed or
+  reanalysis weather at `t` is not available at `t` in reality.
+- Scalers, imputation, encodings and feature selection are fitted inside the
+  training fold only.
+- Walk-forward validation with **purge and embargo**: drop training rows whose
+  target window crosses the fold cutoff, and skip the first `horizon` minutes of
+  the test period. Targets overlap, so an ordinary split is not enough.
+- Backtest policy thresholds are tuned inside the training fold. Tuning them on
+  the test period is leakage wearing a different hat.
+- Trades settle at the actual price of the interval, never the forecast.
+- The registry is a slowly changing dimension: using today's capacities for
+  older features tells the model which farms were later expanded.
 
 ## Security
 
