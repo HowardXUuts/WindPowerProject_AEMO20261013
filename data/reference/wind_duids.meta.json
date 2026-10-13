@@ -1,9 +1,9 @@
 {
   "source_url": "https://aemo.com.au/-/media/files/electricity/nem/participant_information/nem-registration-and-exemption-list.xls",
-  "retrieved_at": "2026-10-13T03:30:01+00:00",
-  "source_sha256": "caab95f176fec55c3939a56b31b097493c7ce1c4eb365dd52769cc9b99d516c1",
-  "source_bytes": 784773,
-  "wind_duids": 110,
+  "retrieved_at": "2026-10-13T03:57:44+00:00",
+  "source_sha256": "e316d89887f0e0938f7e68dc986b26923d2bf56b9f9c79ae15d64528b5c2f91f",
+  "source_bytes": 786539,
+  "wind_duids": 108,
   "regions": [
     "NSW1",
     "QLD1",
@@ -11,5 +11,13 @@
     "TAS1",
     "VIC1"
   ],
-  "total_capacity_mw": 15536.7
+  "total_capacity_mw": 14972.7,
+  "in_scada": 96,
+  "not_in_scada": 12,
+  "excluded_non_generation": [
+    {
+      "duid": "HPR1",
+      "station_name": "Hornsdale Power Reserve"
+    }
+  ]
 }
