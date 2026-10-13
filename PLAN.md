@@ -12,7 +12,7 @@ the repository as built; section 3 marks what is done and what remains.
 │       ├── ingest.yml              # hourly: fetch both feeds → bronze → commit
 │       ├── reference.yml           # manual: refresh the wind DUID registry
 │       ├── tests.yml               # CI: ruff + pytest on every push and PR
-│       └── pages.yml               # build and deploy the dashboard
+│       └── pages.yml               # deploy docs/ when gold changes
 │
 ├── scripts/
 │   ├── nemweb.py                   # shared: list, download, parse, watermark, write
@@ -256,10 +256,14 @@ inspected.
     (~576 intervals, about 48 hour files per source), plus a note on extending
     it from AEMO's archive.
 
-**Phase 6 — Dashboard**
-18. Export JSON slices from gold; build the page (fleet output, per-farm
-    capacity factors, state mix, data freshness and quality panel).
-19. `pages.yml` to deploy on every gold change.
+**Phase 6 — Dashboard** — *done*
+18. `scripts/export_dashboard.py` + `sql/dashboard/`: seven JSON slices from
+    gold into `docs/data/`, about 18 KB in total. ✓
+19. `docs/index.html`: plain HTML and Chart.js from a CDN, no build step.
+    Fleet tiles, regional output, capacity factor trend, best and worst farms,
+    revenue and negative-price exposure, capture detail, quality table. ✓
+20. `pages.yml` deploys `docs/` whenever gold changes, regenerating the JSON
+    rather than committing it. ✓
 
 **Phase 7 — Assistant**
 20. `assistant/schema.md` and the system prompt describing the gold tables.

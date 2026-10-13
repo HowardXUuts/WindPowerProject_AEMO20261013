@@ -1,0 +1,67 @@
+name: Deploy dashboard
+
+# Gold changing is what makes the dashboard stale, so that is the trigger. The
+# JSON slices are regenerated here rather than committed: they are derived from
+# gold and would otherwise be a second copy of the same numbers in git history,
+# able to disagree with the tables they came from.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "data/gold/**"
+      - "docs/**"
+      - "sql/dashboard/**"
+      - "scripts/export_dashboard.py"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  # Never cancel a deploy in flight; just queue behind it.
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install --disable-pip-version-check .
+
+      - name: Export dashboard data from gold
+        run: python scripts/export_dashboard.py
+
+      - name: Show what will be published
+        run: |
+          echo "docs/data:"
+          ls -la docs/data
+          echo "total: $(du -sh docs | cut -f1)"
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

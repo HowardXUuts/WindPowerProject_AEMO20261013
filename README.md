@@ -57,7 +57,8 @@ back to this repository, one file per closed NEM market hour. The wind DUID
 registry is built from AEMO's registration list and refreshed on demand. Silver
 joins the two into a wind-only, quality-flagged table, one immutable file per
 trading date, and gold turns that into revenue, capture price and a live fleet
-snapshot. The dashboard and the Q&A assistant are next.
+snapshot. A static dashboard on GitHub Pages reads JSON slices exported from
+gold. The Q&A assistant is next.
 
 See [`PLAN.md`](PLAN.md) for the repository layout, design decisions, and build
 steps.
