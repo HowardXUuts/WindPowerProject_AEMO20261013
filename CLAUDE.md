@@ -100,6 +100,22 @@ Rules that follow from this:
   `scripts/nemweb.py` with report-specific branching.
 - Log with `logging`, not `print`, in anything that runs in a workflow.
 
+## Data quality
+
+- Checks live in `sql/quality/`, one model per check, each returning one row
+  per finding as (trading_date, subject, observed, message). `check_quality.py`
+  decides severity; the SQL never does.
+- Hard checks fail the run with a non-zero exit: the data contradicts itself and
+  anything built on it would be wrong. Soft checks warn and continue: the data
+  is surprising but plausibly real.
+- Put a check in the soft tier unless a finding means something downstream is
+  definitely incorrect. The NEM is full of genuinely strange but real values —
+  negative prices, farms over nameplate, units offline for days — and a
+  pipeline that fails on all of them gets ignored.
+- Results are rewritten in full to `data/gold/quality.parquet` each run,
+  including a row for every check that found nothing, so a dashboard can tell
+  "ran and passed" from "did not run".
+
 ## Security
 
 - Never commit secrets, API keys, or tokens. The only secret in this project is

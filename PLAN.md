@@ -21,11 +21,13 @@ the repository as built; section 3 marks what is done and what remains.
 │   ├── ingest_price.py             # ReportSpec: DispatchIS   → bronze/price
 │   ├── refresh_reference.py        # wind DUID registry from the AEMO list
 │   ├── build_silver.py             # wind filter, typing, dedup, validation
+│   ├── check_quality.py            # quality checks, hard fail / soft warn
 │   └── build_gold.py               # run the gold SQL, write aggregate tables
 │
 ├── sql/
-│   ├── silver/normalise.sql
-│   ├── silver/quality_checks.sql
+│   ├── silver/wind_output.sql       # wind filter, timestamps, flags
+│   ├── silver/price.sql             # regional price, pricing run only
+│   ├── quality/*.sql                # one model per quality check
 │   └── gold/
 │       ├── generation_5min.sql     # wide, dashboard-ready interval table
 │       ├── farm_daily.sql          # MWh, capacity factor, peak per farm per day
@@ -233,9 +235,9 @@ inspected.
     interval carries both. ✓
 13. Day completeness and sealing, so a permanently incomplete day cannot block
     silver forever. ✓
-14. Quality table: missing DUIDs per interval, value range checks, freshness —
-    surfaced on the dashboard, using `in_scada` to tell a non-scheduled farm
-    from an ingestion gap.
+14. `scripts/check_quality.py` + `sql/quality/`: six checks over silver,
+    hard ones failing the run and soft ones warning, published to
+    `data/gold/quality.parquet` for the dashboard. ✓
 
 **Phase 4 — Gold**
 13. The four gold SQL models, run by `gold.py` as a full rewrite.
