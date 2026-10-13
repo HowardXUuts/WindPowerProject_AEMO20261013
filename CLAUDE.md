@@ -65,6 +65,13 @@ Rules that follow from this:
 - Do not add a compaction step. Merging small files into large ones leaves both
   in git history permanently, so compacting after the fact always costs more
   than writing at the right grain to begin with.
+- A silver day is written once, when bronze holds all 288 intervals for it, or
+  when it is sealed: bronze has observed intervals more than two days past the
+  day's end, so AEMO's two-day retention means the missing files are gone. A
+  sealed day is written as it stands, with `intervals_present` and
+  `is_complete` on every row. Judge this from the data's own latest interval,
+  never the wall clock — a clock seals days during an ingestion outage, writing
+  gaps that were still fillable.
 - Every write is idempotent and keyed off a watermark: each source keeps its
   own at `data/bronze/<source>/_ingested.txt`, one file name per line, appended
   only after a successful Parquet write. Re-running a job must not duplicate

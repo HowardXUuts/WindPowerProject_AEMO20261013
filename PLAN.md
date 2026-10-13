@@ -224,12 +224,18 @@ inspected.
 11. Second source: `ingest_price.py` for DispatchIS `DISPATCH_PRICE`, sharing
     the same core through a `ReportSpec`. ✓
 
-**Phase 3 — Silver and quality**
-11. `silver.py` + `sql/silver/`: cast types, deduplicate on
-    (settlement time, DUID), add UTC and NEM timestamps, join farm metadata,
-    flag negative and above-capacity values rather than dropping them.
-12. `quality.py`: expected-interval coverage, missing DUIDs per interval, value
-    range checks; write a quality table that the dashboard surfaces.
+**Phase 3 — Silver and quality** — *silver done, quality outstanding*
+11. `scripts/build_silver.py` + `sql/silver/`: restate AEMO's interval-ending
+    timestamps as start and end in UTC and NEM local, date by interval start,
+    deduplicate on (interval_start, duid), join the registry, and flag negative
+    and above-capacity values rather than dropping them. ✓
+12. Price silver on the same timestamps, keeping the pricing run where an
+    interval carries both. ✓
+13. Day completeness and sealing, so a permanently incomplete day cannot block
+    silver forever. ✓
+14. Quality table: missing DUIDs per interval, value range checks, freshness —
+    surfaced on the dashboard, using `in_scada` to tell a non-scheduled farm
+    from an ingestion gap.
 
 **Phase 4 — Gold**
 13. The four gold SQL models, run by `gold.py` as a full rewrite.
