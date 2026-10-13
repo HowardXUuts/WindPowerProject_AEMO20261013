@@ -87,3 +87,112 @@ jobs:
           done
           echo "Could not push after 3 attempts." >&2
           exit 1
+
+  # --------------------------------------------------------------------------
+  # bronze -> silver -> quality -> gold
+  #
+  # A separate job rather than more steps, so the transform's result is visible
+  # on its own and a failure here is never mistaken for a failed ingest.
+  #
+  # No job-level concurrency: the workflow already holds the ingest-bronze
+  # group, and a job asking for the same group would queue behind its own run
+  # until it timed out.
+  # --------------------------------------------------------------------------
+  transform:
+    needs: ingest
+    # Completion, not success. Bronze ingest and the transform are independent
+    # concerns: a download that failed for one source must not stop silver being
+    # rebuilt from the bronze already committed, and the reverse is already true
+    # because this job cannot touch data/bronze.
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          # Deep enough to rebase onto a few recent commits without paying for
+          # the whole history, which grows by the hour as data lands.
+          fetch-depth: 50
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install --disable-pip-version-check .
+
+      - name: Take the bronze the ingest job just committed
+        # checkout resolved main before the ingest job pushed, so without this
+        # the transform would silently rebuild yesterday's silver.
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git reset --hard origin/main
+          echo "at $(git rev-parse --short HEAD): $(git log -1 --pretty=%s)"
+
+      - name: Build silver
+        id: silver
+        # Writes every trading date bronze has made ready, not just the newest,
+        # so a backlog drains on its own without a separate backfill mode.
+        run: python scripts/build_silver.py
+
+      - name: Data quality
+        id: quality
+        # Allowed to fail the step without ending the job: silver has already
+        # been written and is worth committing either way. The gate below stops
+        # gold, and the last step still marks the run red.
+        continue-on-error: true
+        run: python scripts/check_quality.py
+
+      - name: Build gold
+        # Only on a clean quality run. A hard failure means silver contradicts
+        # itself, and gold built on it would publish numbers that are wrong
+        # rather than merely missing.
+        if: steps.quality.outcome == 'success'
+        run: python scripts/build_gold.py
+
+      - name: Commit silver and gold
+        if: always()
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add -A data/silver data/gold
+          if git diff --cached --quiet -- data/silver data/gold; then
+            echo "No new silver or gold."
+            exit 0
+          fi
+
+          silver=$(git diff --cached --name-only -- data/silver | grep -c '\.parquet$' || true)
+          gold=$(git diff --cached --name-only -- data/gold | grep -c '\.parquet$' || true)
+          echo "Committing ${silver} silver and ${gold} gold files."
+          git commit -m "data: silver ${silver}, gold ${gold} [skip ci]"
+
+          # Same rebase-and-retry as the ingest job. Silver files are
+          # write-once so they never collide. Gold is a full rewrite, which
+          # would conflict rather than merge if two runs rebuilt it at once —
+          # the workflow-level concurrency group is what prevents that, and no
+          # other workflow writes data/gold. The retry here is for a push that
+          # loses a race to an unrelated commit on main.
+          for attempt in 1 2 3; do
+            if git push; then
+              exit 0
+            fi
+            echo "Push failed (attempt ${attempt}); rebasing onto origin."
+            git pull --rebase --autostash
+            sleep $((attempt * 5))
+          done
+          echo "Could not push after 3 attempts." >&2
+          exit 1
+
+      - name: Fail the run if quality failed
+        # The commit above has already run, so silver is safe. Ending red is
+        # what makes a hard quality failure impossible to miss.
+        if: steps.quality.outcome == 'failure'
+        run: |
+          echo "::error::Hard data quality failure: gold was not rebuilt." >&2
+          exit 1

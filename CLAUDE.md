@@ -116,6 +116,22 @@ Rules that follow from this:
   including a row for every check that found nothing, so a dashboard can tell
   "ran and passed" from "did not run".
 
+## Workflows
+
+- `ingest.yml` runs the whole pipeline hourly: the `ingest` job writes bronze,
+  then the `transform` job runs silver, quality and gold. `transform` depends on
+  `ingest` with `if: always()`, because the two are independent — a download
+  that failed for one source must not stop silver being rebuilt from the bronze
+  already committed.
+- Quality gates gold, not silver. The check runs with `continue-on-error` so
+  silver is still committed, gold is skipped on a hard failure, and a final step
+  ends the run red so the failure cannot pass unnoticed.
+- Concurrency is declared at workflow level only. A job asking for the same
+  group as its own workflow queues behind its own run until it times out.
+- Data commits carry `[skip ci]`, which suppresses every workflow for that push.
+  Anything that must run after a data commit chains off `workflow_run`, not off
+  the push — that is why `pages.yml` watches the ingest workflow finishing.
+
 ## Security
 
 - Never commit secrets, API keys, or tokens. The only secret in this project is

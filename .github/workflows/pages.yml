@@ -5,6 +5,15 @@ name: Deploy dashboard
 # gold and would otherwise be a second copy of the same numbers in git history,
 # able to disagree with the tables they came from.
 on:
+  # The pipeline's own gold commits carry [skip ci], which suppresses every
+  # workflow for that push — including this one. So the scheduled path is
+  # chained off the ingest workflow finishing rather than off the commit it
+  # made: workflow_run is not suppressed by [skip ci].
+  workflow_run:
+    workflows: ["Ingest AEMO bronze"]
+    types: [completed]
+  # Still deploy on a human push that changes the page or the slices, where
+  # there is no [skip ci] to get in the way.
   push:
     branches: [main]
     paths:
@@ -31,6 +40,18 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          # workflow_run checks out the default branch, but at the SHA the
+          # triggering workflow started from. Fetch enough to move to the
+          # commits it made.
+          fetch-depth: 10
+
+      - name: Take the gold the pipeline just committed
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git reset --hard origin/main
+          echo "at $(git rev-parse --short HEAD): $(git log -1 --pretty=%s)"
 
       - uses: actions/setup-python@v5
         with:
