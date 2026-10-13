@@ -8,7 +8,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import httpx
-from nemweb import BRONZE_DIR, LOG, ReportSpec, run
+from nemweb import BRONZE_DIR, LOG, ListingError, ReportSpec, run
 
 
 def main_for(spec: ReportSpec, doc: str | None = None) -> Callable[[list[str] | None], int]:
@@ -32,6 +32,9 @@ def main_for(spec: ReportSpec, doc: str | None = None) -> Callable[[list[str] | 
             run(spec, limit=args.limit, list_only=args.list_only, bronze_dir=args.bronze_dir)
         except httpx.HTTPError as exc:
             LOG.error("[%s] could not reach AEMO: %s", spec.key, exc)
+            return 1
+        except ListingError as exc:
+            LOG.error("[%s] %s", spec.key, exc)
             return 1
         return 0
 

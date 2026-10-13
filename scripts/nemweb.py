@@ -47,6 +47,10 @@ class ParseError(Exception):
     """The AEMO CSV payload could not be interpreted."""
 
 
+class ListingError(Exception):
+    """The AEMO directory listing could not be understood."""
+
+
 # ---------------------------------------------------------------------------
 # Report declaration
 # ---------------------------------------------------------------------------
@@ -74,7 +78,11 @@ class ReportSpec:
 
     @property
     def filename_re(self) -> re.Pattern[str]:
-        return re.compile(rf"{self.file_prefix}_(\d{{14}})_\d+\.zip", re.IGNORECASE)
+        # Dispatch reports stamp the interval as YYYYMMDDHHMM; some NEMWeb
+        # reports add seconds. Accept either, longest first.
+        return re.compile(
+            rf"{self.file_prefix}_(\d{{14}}|\d{{12}})_\d+\.zip", re.IGNORECASE
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -240,14 +248,29 @@ def interval_from_filename(spec: ReportSpec, name: str) -> datetime:
     match = spec.filename_re.search(name)
     if match is None:
         raise ParseError(f"not a {spec.file_prefix} file name: {name!r}")
-    return datetime.strptime(match.group(1), "%Y%m%d%H%M%S").replace(tzinfo=NEM_TZ)
+    stamp = match.group(1)
+    fmt = "%Y%m%d%H%M%S" if len(stamp) == 14 else "%Y%m%d%H%M"
+    return datetime.strptime(stamp, fmt).replace(tzinfo=NEM_TZ)
 
 
 def list_remote_files(spec: ReportSpec, client: httpx.Client) -> list[str]:
-    """Return the report's zip file names in the AEMO directory listing."""
+    """Return the report's zip file names in the AEMO directory listing.
+
+    A 200 response with no matching file names means the listing format moved
+    out from under the pattern, not that AEMO published nothing: ``Current/``
+    always holds about two days of files. Treating that as "nothing to ingest"
+    produces a green run that silently ingests zero rows, so it raises instead.
+    """
     response = client.get(spec.url)
     response.raise_for_status()
-    return sorted({match.group(0) for match in spec.filename_re.finditer(response.text)})
+    names = sorted({match.group(0) for match in spec.filename_re.finditer(response.text)})
+    if not names:
+        excerpt = " ".join(response.text.split())[:200]
+        raise ListingError(
+            f"no {spec.file_prefix} file names in {spec.url} "
+            f"({len(response.text)} bytes). First 200 chars: {excerpt!r}"
+        )
+    return names
 
 
 def download(spec: ReportSpec, client: httpx.Client, name: str) -> bytes:
