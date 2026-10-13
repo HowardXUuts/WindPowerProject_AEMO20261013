@@ -27,7 +27,7 @@ No cloud account, no database server, no paid services.
 |-------|---------------|
 | **bronze** | Both feeds as published, every DUID and region. One Parquet file per closed NEM hour, never rewritten. |
 | **silver** | Wind only. Interval start and end in UTC and NEM local, deduplicated, quality-flagged. One immutable file per trading date. |
-| **gold** | Aggregates: generation by farm and state, capacity factors, revenue, capture price, negative-price exposure. |
+| **gold** | Aggregates, rewritten in full each run: `farm_daily`, `farm_revenue_daily`, `capture_price`, `region_hourly`, `latest_snapshot`, `quality`. |
 
 ## Stack
 
@@ -56,7 +56,8 @@ Bronze is live: both feeds ingest hourly on GitHub Actions and commit Parquet
 back to this repository, one file per closed NEM market hour. The wind DUID
 registry is built from AEMO's registration list and refreshed on demand. Silver
 joins the two into a wind-only, quality-flagged table, one immutable file per
-trading date. Gold is next.
+trading date, and gold turns that into revenue, capture price and a live fleet
+snapshot. The dashboard and the Q&A assistant are next.
 
 See [`PLAN.md`](PLAN.md) for the repository layout, design decisions, and build
 steps.
