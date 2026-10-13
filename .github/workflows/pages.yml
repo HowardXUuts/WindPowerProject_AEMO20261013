@@ -50,6 +50,12 @@ jobs:
           echo "total: $(du -sh docs | cut -f1)"
 
       - uses: actions/configure-pages@v5
+        with:
+          # Provision the Pages site on first run instead of requiring someone
+          # to flip Settings -> Pages -> Source by hand. Without this the very
+          # first deploy fails with "Get Pages site failed ... Not Found", which
+          # looks like a broken workflow rather than an unset repository option.
+          enablement: true
 
       - uses: actions/upload-pages-artifact@v3
         with:
