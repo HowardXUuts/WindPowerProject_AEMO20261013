@@ -25,7 +25,7 @@ No cloud account, no database server, no paid services.
 
 | Layer | What it holds |
 |-------|---------------|
-| **bronze** | Both feeds as published, every DUID and region. One Parquet file per source file, never rewritten. |
+| **bronze** | Both feeds as published, every DUID and region. One Parquet file per closed NEM hour, never rewritten. |
 | **silver** | Wind only. Typed, deduplicated, validated. UTC and NEM local time. One file per day. |
 | **gold** | Aggregates: generation by farm and state, capacity factors, revenue, capture price, negative-price exposure. |
 
@@ -52,9 +52,13 @@ This project is not affiliated with AEMO.
 
 ## Status
 
-Bronze layer built and tested for both feeds, running hourly on GitHub Actions.
-Silver is next. See [`PLAN.md`](PLAN.md) for the repository layout, design
-decisions, and build steps.
+Bronze is live: both feeds ingest hourly on GitHub Actions and commit Parquet
+back to this repository, one file per closed NEM market hour. The wind DUID
+registry is built from AEMO's registration list and refreshed on demand. Silver
+is next.
+
+See [`PLAN.md`](PLAN.md) for the repository layout, design decisions, and build
+steps.
 
 ## Background
 

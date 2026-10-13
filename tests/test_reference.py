@@ -15,9 +15,12 @@ pytest.importorskip("pandas", reason="reference extras not installed")
 
 from refresh_reference import (  # noqa: E402
     RegistryError,
+    annotate_in_scada,
     extract_wind,
+    is_generation,
     normalise_capacity,
     normalise_region,
+    scada_duids,
     write_csv,
     write_meta,
 )
@@ -28,19 +31,25 @@ HEADERS = [
     "Region",
     "Dispatch Type",
     "Fuel Source - Descriptor",
+    "Technology Type - Descriptor",
     "DUID",
     "Reg Cap (MW)",
 ]
 
+# Row 7 is shaped like Hornsdale Power Reserve: AEMO files the battery under
+# fuel source "Wind" because it sits beside the wind farm. Only the technology
+# and dispatch columns give it away.
 ROWS = [
-    ["Acme Energy", "Example Wind Farm", "SA1", "Generator", "Wind", "EXWF1", 150.0],
-    ["Acme Energy", "Example Wind Farm", "SA1", "Generator", "Wind", "EXWF2", 90.5],
-    ["Beta Power", "Coal Creek", "NSW1", "Generator", "Black Coal", "COAL1", 700.0],
-    ["Gamma Co", "Sunny Solar", "QLD1", "Generator", "Solar", "SOLAR1", 200.0],
-    ["Delta Wind", "Hill Wind", "VIC1", "Generator", "Wind - Onshore", "HILLWF1", 320.0],
-    ["Epsilon", "Island Wind", "TAS1", "Generator", "WIND", "ISLWF1", ""],
-    ["Zeta", "Offshore Trial", "", "Generator", "Wind", "NOREGION1", 50.0],
-    ["Eta", "Battery", "SA1", "Load", "Battery storage", "BATT1", 100.0],
+    ["Acme", "Example Wind Farm", "SA1", "Generator", "Wind", "Wind - Onshore", "EXWF1", 150.0],
+    ["Acme", "Example Wind Farm", "SA1", "Generator", "Wind", "Wind - Onshore", "EXWF2", 90.5],
+    ["Beta", "Coal Creek", "NSW1", "Generator", "Black Coal", "Steam Sub Critical", "COAL1", 700.0],
+    ["Gamma", "Sunny Solar", "QLD1", "Generator", "Solar", "Photovoltaic", "SOLAR1", 200.0],
+    ["Delta", "Hill Wind", "VIC1", "Generator", "Wind - Onshore", "Wind", "HILLWF1", 320.0],
+    ["Epsilon", "Island Wind", "TAS1", "Generator", "WIND", "Wind - Onshore", "ISLWF1", ""],
+    ["Zeta", "Offshore Trial", "", "Generator", "Wind", "Wind - Offshore", "NOREGION1", 50.0],
+    ["Neoen", "Hornsdale Power Reserve", "SA1", "Generator", "Wind", "Battery", "HPR1", 150.0],
+    ["Eta", "Big Battery", "VIC1", "Load", "Battery storage", "Battery Storage", "BATT1", 100.0],
+    ["Theta", "New BDU", "NSW1", "Bidirectional", "Wind", "", "BDU1", 80.0],
 ]
 
 
@@ -64,22 +73,60 @@ def workbook_bytes(headers=HEADERS, rows=ROWS, sheet="Generators and Scheduled L
 
 
 def test_extracts_only_wind_rows():
-    rows = extract_wind(workbook_bytes())
+    rows = extract_wind(workbook_bytes()).kept
     assert [row["duid"] for row in rows] == ["EXWF1", "EXWF2", "HILLWF1", "ISLWF1"]
 
 
 def test_excludes_coal_solar_and_storage():
-    duids = {row["duid"] for row in extract_wind(workbook_bytes())}
+    duids = {row["duid"] for row in extract_wind(workbook_bytes()).kept}
     assert duids.isdisjoint({"COAL1", "SOLAR1", "BATT1"})
+
+
+def test_hornsdale_power_reserve_is_not_a_wind_farm():
+    # The regression this exists for: HPR1 shipped in the registry because its
+    # fuel source descriptor reads "Wind". It is a battery.
+    result = extract_wind(workbook_bytes())
+    assert "HPR1" not in {row["duid"] for row in result.kept}
+    assert "HPR1" in {row["duid"] for row in result.excluded}
+
+
+def test_bidirectional_units_are_excluded():
+    # Newer registrations use a Bidirectional dispatch type instead of a
+    # Generator/Load pair, with nothing in the technology column.
+    assert "BDU1" not in {row["duid"] for row in extract_wind(workbook_bytes()).kept}
+
+
+def test_exclusions_are_reported_with_enough_detail_to_check():
+    excluded = {row["duid"]: row for row in extract_wind(workbook_bytes()).excluded}
+    assert excluded["HPR1"]["station_name"] == "Hornsdale Power Reserve"
+    assert excluded["HPR1"]["fuel_type"] == "Wind"
+    assert excluded["HPR1"]["technology_type"] == "Battery"
+
+
+@pytest.mark.parametrize(
+    ("fuel", "technology", "dispatch", "expected"),
+    [
+        ("Wind", "Wind - Onshore", "Generator", True),
+        ("Wind", "Battery Storage", "Generator", False),
+        ("Wind", "", "Bidirectional", False),
+        ("Wind", "", "Bi-Directional", False),
+        ("Wind", "BESS", "Generator", False),
+        ("Wind", "", "Load", False),
+        ("Wind", "Pump Storage", "Generator", False),
+        ("Wind - Offshore", "", "Generator", True),
+    ],
+)
+def test_is_generation(fuel, technology, dispatch, expected):
+    assert is_generation(fuel, technology, dispatch) is expected
 
 
 def test_drops_rows_without_a_nem_region():
     # A wind row with no region cannot be joined to a price, so it is dropped.
-    assert "NOREGION1" not in {row["duid"] for row in extract_wind(workbook_bytes())}
+    assert "NOREGION1" not in {row["duid"] for row in extract_wind(workbook_bytes()).kept}
 
 
 def test_captures_station_region_and_capacity():
-    row = next(r for r in extract_wind(workbook_bytes()) if r["duid"] == "HILLWF1")
+    row = next(r for r in extract_wind(workbook_bytes()).kept if r["duid"] == "HILLWF1")
     assert row["station_name"] == "Hill Wind"
     assert row["region"] == "VIC1"
     assert row["fuel_type"] == "Wind - Onshore"
@@ -88,31 +135,31 @@ def test_captures_station_region_and_capacity():
 
 def test_missing_capacity_becomes_none_not_zero():
     # Zero would read as a real 0 MW farm and silently break capacity factors.
-    row = next(r for r in extract_wind(workbook_bytes()) if r["duid"] == "ISLWF1")
+    row = next(r for r in extract_wind(workbook_bytes()).kept if r["duid"] == "ISLWF1")
     assert row["capacity_mw"] is None
 
 
 def test_matches_fuel_case_insensitively():
-    assert "ISLWF1" in {row["duid"] for row in extract_wind(workbook_bytes())}  # "WIND"
+    assert "ISLWF1" in {row["duid"] for row in extract_wind(workbook_bytes()).kept}  # "WIND"
 
 
 def test_finds_the_header_even_when_columns_are_renamed():
     headers = list(HEADERS)
-    headers[4] = "Technology Type - Primary"  # an older edition's spelling
-    headers[6] = "Registered Capacity (MW)"
-    rows = extract_wind(workbook_bytes(headers=headers))
+    headers[4] = "Fuel Source - Primary"  # an older edition's spelling
+    headers[7] = "Registered Capacity (MW)"
+    rows = extract_wind(workbook_bytes(headers=headers)).kept
     assert len(rows) == 4
 
 
 def test_reports_what_it_saw_when_a_column_is_missing():
     headers = [h for h in HEADERS if h != "Reg Cap (MW)"] + ["Something Else"]
-    rows = [row[:6] + ["x"] for row in ROWS]
+    rows = [row[:7] + ["x"] for row in ROWS]
     with pytest.raises(RegistryError, match="columns not found"):
         extract_wind(workbook_bytes(headers=headers, rows=rows))
 
 
 def test_rejects_a_workbook_with_no_wind():
-    rows = [r for r in ROWS if "Wind" not in str(r[4]) and "WIND" not in str(r[4])]
+    rows = [r for r in ROWS if "ind" not in str(r[4]).lower()]
     with pytest.raises(RegistryError, match="no wind rows"):
         extract_wind(workbook_bytes(rows=rows))
 
@@ -140,22 +187,108 @@ def test_normalise_capacity(raw, expected):
 
 def test_csv_is_written_sorted_with_a_stable_header(tmp_path):
     destination = tmp_path / "wind_duids.csv"
-    write_csv(extract_wind(workbook_bytes()), destination)
+    write_csv(extract_wind(workbook_bytes()).kept, destination)
 
     lines = destination.read_text().splitlines()
-    assert lines[0] == "duid,station_name,region,fuel_type,capacity_mw"
+    assert lines[0] == "duid,station_name,region,fuel_type,capacity_mw,in_scada"
     assert [line.split(",")[0] for line in lines[1:]] == ["EXWF1", "EXWF2", "HILLWF1", "ISLWF1"]
 
 
 def test_meta_records_provenance(tmp_path):
     payload = workbook_bytes()
-    rows = extract_wind(payload)
+    rows, excluded = extract_wind(payload)
     destination = tmp_path / "wind_duids.meta.json"
-    write_meta(rows, payload, "https://example.invalid/list.xls", destination)
+    write_meta(rows, payload, "https://example.invalid/list.xls", destination, excluded)
 
     meta = json.loads(destination.read_text())
     assert meta["wind_duids"] == 4
+    assert {e["duid"] for e in meta["excluded_non_generation"]} == {"HPR1", "BDU1"}
     assert meta["regions"] == ["SA1", "TAS1", "VIC1"]
     assert meta["total_capacity_mw"] == 560.5  # ISLWF1 has none
     assert len(meta["source_sha256"]) == 64
     assert meta["source_url"].startswith("https://")
+
+
+# --- in_scada flag --------------------------------------------------------
+
+
+def _bronze_with(duids, tmp_path):
+    """Write a minimal bronze SCADA tree holding the given DUIDs."""
+    import duckdb
+
+    destination = tmp_path / "scada" / "date=2026-10-13" / "hour=00.parquet"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    values = ", ".join(f"('{duid}')" for duid in duids)
+    con = duckdb.connect()
+    try:
+        con.execute(
+            f"COPY (SELECT * FROM (VALUES {values}) AS t(duid)) "
+            f"TO '{destination}' (FORMAT PARQUET)"
+        )
+    finally:
+        con.close()
+    return tmp_path
+
+
+def test_scada_duids_reads_the_bronze_tree(tmp_path):
+    _bronze_with(["EXWF1", "HILLWF1", "COAL1"], tmp_path)
+    assert scada_duids(tmp_path) == {"EXWF1", "HILLWF1", "COAL1"}
+
+
+def test_scada_duids_is_none_when_bronze_is_empty(tmp_path):
+    # Unknown, not "absent from SCADA" — the distinction the flag exists for.
+    assert scada_duids(tmp_path) is None
+
+
+def test_annotate_marks_units_present_in_scada(tmp_path):
+    rows = extract_wind(workbook_bytes()).kept
+    annotate_in_scada(rows, _bronze_with(["EXWF1", "HILLWF1"], tmp_path) and scada_duids(tmp_path))
+
+    flags = {row["duid"]: row["in_scada"] for row in rows}
+    assert flags == {"EXWF1": True, "EXWF2": False, "HILLWF1": True, "ISLWF1": False}
+
+
+def test_non_scheduled_farms_are_false_not_missing(tmp_path):
+    # A registered farm that never appears in DISPATCHSCADA is non-scheduled:
+    # a property of the unit, not a gap in ingestion.
+    rows = extract_wind(workbook_bytes()).kept
+    _bronze_with(["EXWF1"], tmp_path)
+    annotate_in_scada(rows, scada_duids(tmp_path))
+
+    absent = [row["duid"] for row in rows if row["in_scada"] is False]
+    assert absent == ["EXWF2", "HILLWF1", "ISLWF1"]
+
+
+def test_unknown_in_scada_stays_none(tmp_path):
+    rows = extract_wind(workbook_bytes()).kept
+    annotate_in_scada(rows, scada_duids(tmp_path))
+    assert all(row["in_scada"] is None for row in rows)
+
+
+def test_csv_writes_lowercase_booleans_and_blank_for_unknown(tmp_path):
+    rows = extract_wind(workbook_bytes()).kept
+    _bronze_with(["EXWF1"], tmp_path / "bronze")
+    annotate_in_scada(rows, scada_duids(tmp_path / "bronze"))
+    rows[1]["in_scada"] = None  # simulate an unknown alongside known values
+
+    destination = tmp_path / "wind_duids.csv"
+    write_csv(rows, destination)
+    lines = destination.read_text().splitlines()
+
+    assert lines[1].endswith(",true")
+    assert lines[2].endswith(",")  # blank, not "None"
+    assert lines[3].endswith(",false")
+
+
+def test_meta_counts_scada_coverage(tmp_path):
+    payload = workbook_bytes()
+    rows, excluded = extract_wind(payload)
+    _bronze_with(["EXWF1", "HILLWF1"], tmp_path / "bronze")
+    annotate_in_scada(rows, scada_duids(tmp_path / "bronze"))
+
+    destination = tmp_path / "meta.json"
+    write_meta(rows, payload, "https://example.invalid/list.xls", destination, excluded)
+    meta = json.loads(destination.read_text())
+
+    assert meta["in_scada"] == 2
+    assert meta["not_in_scada"] == 2

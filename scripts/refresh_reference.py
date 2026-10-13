@@ -28,14 +28,16 @@ import re
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Final
+from typing import Final, NamedTuple
 
+import duckdb
 import httpx
 
 LOG: Final = logging.getLogger("refresh_reference")
 
 REPO_ROOT: Final = Path(__file__).resolve().parent.parent
 OUT_CSV: Final = REPO_ROOT / "data" / "reference" / "wind_duids.csv"
+BRONZE_DIR: Final = REPO_ROOT / "data" / "bronze"
 
 SOURCE_URL: Final = (
     "https://aemo.com.au/-/media/files/electricity/nem/participant_information/"
@@ -69,8 +71,28 @@ COLUMN_HINTS: Final = {
     ),
 }
 
-HEADER: Final = ("duid", "station_name", "region", "fuel_type", "capacity_mw")
+# Read when present, and used only to reject non-generation. AEMO's fuel source
+# descriptor reads "Wind" for a battery co-located with a wind farm — Hornsdale
+# Power Reserve (HPR1) is the worked example — so fuel alone cannot tell a
+# turbine from a battery. Optional, because older editions omit them; when they
+# are missing the exclusion falls back to whatever the fuel column says.
+OPTIONAL_COLUMN_HINTS: Final = {
+    "technology_type": (
+        "technology type - descriptor",
+        "technology type descriptor",
+        "technology type - primary",
+        "technology type",
+    ),
+    "dispatch_type": ("dispatch type", "dispatch type - descriptor", "dispatch type descriptor"),
+}
+
+HEADER: Final = ("duid", "station_name", "region", "fuel_type", "capacity_mw", "in_scada")
 WIND_RE: Final = re.compile(r"wind", re.IGNORECASE)
+
+# Storage and bidirectional units are not generation, whatever their fuel says.
+NOT_GENERATION_RE: Final = re.compile(
+    r"batter|bess|storage|bi-?directional|pump|load", re.IGNORECASE
+)
 HTTP_TIMEOUT: Final = httpx.Timeout(120.0, connect=30.0)
 USER_AGENT: Final = "aemo-wind/0.1 (+github.com/HowardXUuts/WindPowerProject_AEMO20261013)"
 
@@ -131,17 +153,30 @@ def find_header_row(frame: object) -> int:
 
 
 def map_columns(columns: list[str]) -> dict[str, str]:
-    """Map each output column to the source column that supplies it."""
+    """Map each output column to the source column that supplies it.
+
+    Optional columns are reported but never fatal, so a renamed technology
+    column degrades the exclusion rather than failing the whole refresh.
+    """
     normalised = {str(name).strip().lower(): name for name in columns}
     mapping: dict[str, str] = {}
-    for field, hints in COLUMN_HINTS.items():
+    for field, hints in {**COLUMN_HINTS, **OPTIONAL_COLUMN_HINTS}.items():
         for hint in hints:
             if hint in normalised:
                 mapping[field] = normalised[hint]
                 break
-    missing = [field for field in HEADER if field not in mapping]
+
+    missing = [field for field in COLUMN_HINTS if field not in mapping]
     if missing:
         raise RegistryError(f"columns not found: {missing}. Header row holds: {list(normalised)}")
+
+    absent = [field for field in OPTIONAL_COLUMN_HINTS if field not in mapping]
+    if absent:
+        LOG.warning(
+            "optional columns not found: %s. Battery and storage units can only be "
+            "excluded by fuel source, which reads 'Wind' for some of them.",
+            absent,
+        )
     return mapping
 
 
@@ -169,7 +204,24 @@ def normalise_capacity(value: object) -> float | None:
     return capacity if capacity > 0 else None
 
 
-def extract_wind(payload: bytes) -> list[dict[str, object]]:
+class WindRows(NamedTuple):
+    """Wind DUIDs kept, and the non-generation rows rejected alongside them."""
+
+    kept: list[dict[str, object]]
+    excluded: list[dict[str, object]]
+
+
+def is_generation(fuel: str, technology: str, dispatch: str) -> bool:
+    """Return False for storage and bidirectional units masquerading as wind.
+
+    AEMO files Hornsdale Power Reserve under fuel source "Wind" because it sits
+    beside the wind farm, so the technology and dispatch columns are what
+    actually separate a turbine from a battery.
+    """
+    return not NOT_GENERATION_RE.search(" ".join((fuel, technology, dispatch)))
+
+
+def extract_wind(payload: bytes) -> WindRows:
     """Return one row per wind DUID in the registration list."""
     sheets = read_sheets(payload)
     sheet_name = pick_sheet(sheets)
@@ -184,7 +236,12 @@ def extract_wind(payload: bytes) -> list[dict[str, object]]:
     body = frame.iloc[header_row + 1 :].copy()
     body.columns = columns
 
+    def cell(row: object, field: str) -> str:
+        """Read an optional column, or empty string when it is not present."""
+        return str(row[mapping[field]]).strip() if field in mapping else ""
+
     records: dict[str, dict[str, object]] = {}
+    excluded: dict[str, dict[str, object]] = {}
     skipped_region = 0
     for _, row in body.iterrows():
         duid = str(row[mapping["duid"]]).strip().upper()
@@ -195,6 +252,20 @@ def extract_wind(payload: bytes) -> list[dict[str, object]]:
         if not WIND_RE.search(fuel):
             continue
 
+        technology = cell(row, "technology_type")
+        dispatch = cell(row, "dispatch_type")
+        station = " ".join(str(row[mapping["station_name"]]).split())
+
+        if not is_generation(fuel, technology, dispatch):
+            excluded[duid] = {
+                "duid": duid,
+                "station_name": station,
+                "fuel_type": " ".join(fuel.split()),
+                "technology_type": technology,
+                "dispatch_type": dispatch,
+            }
+            continue
+
         region = normalise_region(row[mapping["region"]])
         if region is None:
             # A generator with no NEM region is not dispatchable here.
@@ -203,19 +274,65 @@ def extract_wind(payload: bytes) -> list[dict[str, object]]:
 
         records[duid] = {
             "duid": duid,
-            "station_name": " ".join(str(row[mapping["station_name"]]).split()),
+            "station_name": station,
             "region": region,
             "fuel_type": " ".join(fuel.split()),
             "capacity_mw": normalise_capacity(row[mapping["capacity_mw"]]),
+            "in_scada": None,
         }
 
     if skipped_region:
         LOG.warning("skipped %d wind rows with no recognisable NEM region", skipped_region)
+    for row in excluded.values():
+        LOG.info(
+            "excluded %s (%s): not generation [fuel=%r technology=%r dispatch=%r]",
+            row["duid"],
+            row["station_name"],
+            row["fuel_type"],
+            row["technology_type"],
+            row["dispatch_type"],
+        )
     if not records:
         raise RegistryError("no wind rows found; the fuel column may have moved")
 
-    LOG.info("found %d wind DUIDs", len(records))
-    return [records[duid] for duid in sorted(records)]
+    LOG.info("found %d wind DUIDs, excluded %d non-generation", len(records), len(excluded))
+    return WindRows(
+        kept=[records[duid] for duid in sorted(records)],
+        excluded=[excluded[duid] for duid in sorted(excluded)],
+    )
+
+
+def scada_duids(bronze_dir: Path = BRONZE_DIR) -> set[str] | None:
+    """Return the DUIDs present in committed bronze SCADA, or None if there is none.
+
+    None and "not present" are different facts: an empty bronze tree means the
+    flag is unknown, not that every farm is missing from SCADA.
+    """
+    files = sorted((bronze_dir / "scada").glob("**/*.parquet"))
+    if not files:
+        LOG.warning("no bronze SCADA files under %s; in_scada will be left blank", bronze_dir)
+        return None
+
+    pattern = str(bronze_dir / "scada" / "**" / "*.parquet").replace("'", "''")
+    con = duckdb.connect()
+    try:
+        rows = con.execute(f"SELECT DISTINCT duid FROM read_parquet('{pattern}')").fetchall()
+    finally:
+        con.close()
+
+    LOG.info("bronze SCADA covers %d distinct DUIDs across %d files", len(rows), len(files))
+    return {str(row[0]) for row in rows}
+
+
+def annotate_in_scada(rows: list[dict[str, object]], duids: set[str] | None) -> None:
+    """Flag each registry row with whether bronze SCADA has ever reported it.
+
+    Non-scheduled wind farms are registered but never appear in DISPATCHSCADA,
+    so a missing DUID is a property of the unit, not a gap in ingestion. The
+    quality checks need to tell those two apart.
+    """
+    for row in rows:
+        row["in_scada"] = None if duids is None else row["duid"] in duids
 
 
 def write_csv(rows: list[dict[str, object]], destination: Path) -> None:
@@ -227,10 +344,24 @@ def write_csv(rows: list[dict[str, object]], destination: Path) -> None:
         writer = csv.DictWriter(handle, fieldnames=HEADER)
         writer.writeheader()
         for row in rows:
-            writer.writerow(row)
+            # Lowercase booleans, and blank rather than "None" for unknown, so
+            # the file reads the same way to DuckDB, pandas and a human.
+            writer.writerow(
+                {
+                    key: ("" if value is None else "true" if value is True else
+                          "false" if value is False else value)
+                    for key, value in row.items()
+                }
+            )
 
 
-def write_meta(rows: list[dict[str, object]], payload: bytes, url: str, destination: Path) -> None:
+def write_meta(
+    rows: list[dict[str, object]],
+    payload: bytes,
+    url: str,
+    destination: Path,
+    excluded: list[dict[str, object]] | None = None,
+) -> None:
     """Record where the registry came from, so a stale file is obvious."""
     meta = {
         "source_url": url,
@@ -242,6 +373,14 @@ def write_meta(rows: list[dict[str, object]], payload: bytes, url: str, destinat
         "total_capacity_mw": round(
             sum(float(row["capacity_mw"]) for row in rows if row["capacity_mw"]), 1
         ),
+        "in_scada": sum(1 for row in rows if row["in_scada"] is True),
+        "not_in_scada": sum(1 for row in rows if row["in_scada"] is False),
+        # Named rather than counted: a unit AEMO files as wind but which is not
+        # generation is the kind of thing a reviewer should be able to check.
+        "excluded_non_generation": [
+            {"duid": row["duid"], "station_name": row["station_name"]}
+            for row in (excluded or [])
+        ],
     }
     destination.write_text(json.dumps(meta, indent=2) + "\n")
 
@@ -261,6 +400,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--url", default=SOURCE_URL, help="registration list URL")
     parser.add_argument("--from-file", type=Path, default=None, help="use a local copy instead")
     parser.add_argument("--out", type=Path, default=OUT_CSV, help="output CSV path")
+    parser.add_argument(
+        "--bronze-dir", type=Path, default=BRONZE_DIR, help="bronze tree, for the in_scada flag"
+    )
     parser.add_argument("--inspect", action="store_true", help="dump sheets and columns, then exit")
     parser.add_argument("--verbose", action="store_true", help="enable debug logging")
     args = parser.parse_args(argv)
@@ -280,20 +422,24 @@ def main(argv: list[str] | None = None) -> int:
         if args.inspect:
             inspect(payload)
             return 0
-        rows = extract_wind(payload)
+        rows, excluded = extract_wind(payload)
     except RegistryError as exc:
         LOG.error("%s", exc)
         LOG.error("run with --inspect to dump the workbook's sheets and header rows")
         return 1
 
+    annotate_in_scada(rows, scada_duids(args.bronze_dir))
     write_csv(rows, args.out)
-    write_meta(rows, payload, args.url, args.out.with_suffix(".meta.json"))
+    write_meta(rows, payload, args.url, args.out.with_suffix(".meta.json"), excluded)
 
     capacity = sum(float(row["capacity_mw"]) for row in rows if row["capacity_mw"])
     missing = sum(1 for row in rows if not row["capacity_mw"])
+    absent = sum(1 for row in rows if row["in_scada"] is False)
     LOG.info("wrote %s: %d wind DUIDs, %.1f MW registered", args.out, len(rows), capacity)
     if missing:
         LOG.warning("%d DUIDs have no registered capacity (capacity factor will be null)", missing)
+    if absent:
+        LOG.info("%d DUIDs never appear in bronze SCADA (non-scheduled units)", absent)
     return 0
 
 
