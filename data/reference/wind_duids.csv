@@ -1,0 +1,111 @@
+duid,station_name,region,fuel_type,capacity_mw
+ARWF1,Ararat Wind Farm,VIC1,Wind,241.59
+BALDHWF1,Bald Hills Wind Farm,VIC1,Wind,106.6
+BANGOWF1,Bango 973 Wind Farm,NSW1,Wind,159.0
+BANGOWF2,Bango 999 Wind Farm,NSW1,Wind,84.8
+BLUFF1,The Bluff Wind Farm,SA1,Wind,52.5
+BOCORWF1,Boco Rock Wind Farm,NSW1,Wind,113.18
+BODWF1,Bodangora Wind Farm,NSW1,Wind,113.19
+BRYB1WF1,Berrybank Wind Farm,VIC1,Wind,180.6
+BRYB2WF2,Berrybank 2 Wind Farm,VIC1,Wind,109.0
+BULGANA1,Bulgana Green Power Hub,VIC1,Wind,204.0
+CAPTL_WF,Capital Wind Farm,NSW1,Wind,140.0
+CATHROCK,Cathedral Rocks,SA1,Wind,66.0
+CBWF1,Coonooer Bridge Wind Farm,VIC1,Wind,19.8
+CHALLHWF,Challicum Hills Wind Farm,VIC1,Wind,52.5
+CHPSTWF1,Chepstowe Wind Farm,VIC1,Wind,6.15
+CHYTWF1,Cherry Tree Wind Farm,VIC1,Wind,57.6
+CLEMGPWF,Clements Gap Wind Farm,SA1,Wind,57.0
+CLRKCWF1,Clarke Creek Wind Farm,QLD1,Wind,345.5
+CLRKCWF2,Clarke Creek Wind Farm,QLD1,Wind,103.5
+CNUNDAWF,Canunda Wind Farm,SA1,Wind,46.0
+CODRNGTON,Codrington Wind Farm,VIC1,Wind,18.2
+COLWF01,Collector Wind Farm 1,NSW1,Wind,226.0
+COOPGWF1,Coopers Gap Wind Farm,QLD1,Wind,452.0
+CROOKWF2,Crookwell 2 Wind Farm,NSW1,Wind,96.04
+CROOKWF3,Crookwell 3 Wind Farm,NSW1,Wind,57.0
+CROWLWF1,Crowlands Wind Farm,VIC1,Wind,79.95
+CRURWF1,Crudine Ridge Wind Farm,NSW1,Wind,141.0
+CTHLWF1,Cattle Hill Wind Farm,TAS1,Wind,148.0
+CULLRGWF,Cullerin Range Wind Farm,NSW1,Wind,30.0
+DIAPURWF1,Diapur Wind Farm,VIC1,Wind,8.0
+DULAWF1,Dulacca Wind Farm,QLD1,Wind,180.0
+DUNDWF1,Dundonnell Wind Farm,VIC1,Wind,168.0
+DUNDWF2,Dundonnell Wind Farm,VIC1,Wind,46.0
+DUNDWF3,Dundonnell Wind Farm,VIC1,Wind,121.0
+ELAINWF1,Elaine Wind Farm,VIC1,Wind,83.6
+FLYCRKWF,Flyers Creek Wind Farm,NSW1,Wind,145.0
+FNWF1,Ferguson North Wind Farm,VIC1,Wind,4.0
+FSWF1,Ferguson South Wind Farm,VIC1,Wind,8.0
+GPWFEST1,Golden Plains Wind Farm East,VIC1,Wind,248.0
+GPWFEST2,Golden Plains Wind Farm East,VIC1,Wind,260.4
+GPWFEST3,Golden Plains Wind Farm East,VIC1,Wind,248.0
+GPWFWST1,Golden Plains Wind Farm West,VIC1,Wind,266.0
+GPWFWST2,Golden Plains Wind Farm West,VIC1,Wind,310.0
+GRANWF1,Granville Harbour Wind Farm,TAS1,Wind,110.0
+GSWF1A,Goyder South Wind Farm 1A,SA1,Wind,209.0
+GSWF1B1,Goyder South Wind Farm 1B,SA1,Wind,203.0
+GULLRWF1,Gullen Range Wind Farm,NSW1,Wind,165.0
+GULLRWF2,Gullen Range Wind Farm,NSW1,Wind,110.0
+GUNNING1,Gunning Wind Farm,NSW1,Wind,46.5
+HALLWF1,Hallett 1 Wind Farm,SA1,Wind,94.5
+HALLWF2,Hallett 2 Wind Farm,SA1,Wind,71.4
+HD1WF1,Hawkesdale Wind Farm,VIC1,Wind,96.6
+HDWF1,Hornsdale Wind Farm,SA1,Wind,102.4
+HDWF2,Hornsdale Wind Farm 2,SA1,Wind,102.4
+HDWF3,Hornsdale Wind Farm 3,SA1,Wind,112.0
+HEPWIND1,Hepburn Community Wind Farm,VIC1,Wind,4.1
+HPR1,Hornsdale Power Reserve,SA1,Wind,150.0
+KABANWF1,Kaban Wind Farm,QLD1,Wind,156.0
+KEPWF1,Kennedy Energy Park,QLD1,Wind,43.0
+KIATAWF1,Kiata Wind Farm,VIC1,Wind,31.05
+LGAPWF1,Lincoln Gap Wind Farm,SA1,Wind,126.0
+LGAPWF2,Lincoln Gap Wind Farm,SA1,Wind,86.0
+LKBONNY1,Lake Bonney Wind Farm Stage 1,SA1,Wind,80.5
+LKBONNY2,Lake Bonney Stage 2 Windfarm,SA1,Wind,159.0
+LKBONNY3,Lake Bonney Stage 3 Wind Farm,SA1,Wind,39.0
+MACARTH1,Macarthur Wind Farm,VIC1,Wind,420.0
+MAROOWF1,Maroona Wind Farm,VIC1,Wind,6.8
+MCINTYR1,MacIntyre Wind Farm,QLD1,Wind,923.0
+MERCER01,Mt Mercer Wind Farm,VIC1,Wind,131.2
+MEWF1,Mount Emerald Wind Farm,QLD1,Wind,180.0
+MLWF1,Mortons Lane Wind Farm,VIC1,Wind,20.0
+MOORAWF1,Moorabool Wind Farm,VIC1,Wind,312.0
+MRTLSWF1,Mortlake South Wind Farm,VIC1,Wind,157.5
+MTGELWF1,Mt Gellibrand Wind Farm,VIC1,Wind,138.0
+MTMILLAR,Mt Millar Wind Farm,SA1,Wind,70.0
+MUSSELR1,Musselroe Wind Farm,TAS1,Wind,168.0
+MUWAWF1,Murra Warra Wind Farm,VIC1,Wind,231.8
+MUWAWF2,Murra Warra Wind Farm Stage 2,VIC1,Wind,209.0
+NBHWF1,North Brown Hill Wind Farm,SA1,Wind,132.3
+OAKLAND1,Oaklands Hill Wind Farm,VIC1,Wind,67.0
+PAREPW1,Port Augusta Renewable Energy Park,SA1,Wind,210.0
+RYANCWF1,Ryan Corner Wind Farm,VIC1,Wind,218.4
+RYEPARK1,Rye Park Renewable Energy,NSW1,Wind,396.0
+SALTCRK1,Salt Creek Wind Farm,VIC1,Wind,54.0
+SAPHWF1,Sapphire Wind Farm,NSW1,Wind,270.0
+SNOWNTH1,Snowtown Wind Farm Stage 2 North,SA1,Wind,144.0
+SNOWSTH1,Snowtown South Wind Farm,SA1,Wind,126.0
+SNOWTWN1,Snowtown Wind Farm Units 1 And 47,SA1,Wind,99.0
+STARHLWF,Starfish Hill Wind Farm,SA1,Wind,34.5
+STOCKYD1,Stockyard Hill Wind Farm,VIC1,Wind,531.0
+STWF1,Silverton Wind Farm,NSW1,Wind,198.94
+TARALGA1,Taralga Wind Farm,NSW1,Wind,106.8
+TIMWEST,Timboon West Wind Farm,VIC1,Wind,7.2
+TOORAWF,Toora Wind Farm,VIC1,Wind,21.0
+UWF1,Uungula Wind Farm,NSW1,Wind,414.0
+WAMBOWF1,Wambo Wind Farm 1,QLD1,Wind,252.0
+WAMBOWF2,Wambo Wind Farm 2,QLD1,Wind,254.0
+WATERLWF,Waterloo Wind Farm,SA1,Wind,130.8
+WAUBRAWF,Waubra Wind Farm,VIC1,Wind,192.0
+WGWF1,Willogoleche Wind Farm,SA1,Wind,122.0
+WHILL1,Windy Hill Wind Farm,QLD1,Wind,12.0
+WONWP,Wonthaggi Wind Farm,VIC1,Wind,12.0
+WOODLWN1,Woodlawn Wind Farm,NSW1,Wind,48.3
+WOOLNTH1,Woolnorth Studland Bay / Bluff Point Wind Farm,TAS1,Wind,140.0
+WPWF,Wattle Point Wind Farm,SA1,Wind,90.75
+WRWF1,White Rock Wind Farm,NSW1,Wind,175.0
+YAMBUKWF,Yambuk Wind Farm,VIC1,Wind,30.0
+YAWWF1,Yawong Wind Farm,VIC1,Wind,7.2
+YENDWF1,Yendon Wind Farm,VIC1,Wind,144.4
+YSWF1,Yaloak South Wind Farm,VIC1,Wind,28.7
