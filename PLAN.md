@@ -8,7 +8,7 @@ Repository layout, design decisions, and build order. No implementation yet.
 .
 ├── .github/
 │   └── workflows/
-│       ├── ingest.yml              # hourly: fetch → bronze → silver → gold → commit
+│       ├── ingest.yml              # hourly: fetch both feeds → bronze → commit
 │       ├── compact.yml             # daily: roll closed hour files into day files
 │       ├── registry.yml            # weekly: refresh wind DUID registry, open PR on change
 │       ├── tests.yml               # CI: ruff + pytest on every push and PR
@@ -35,6 +35,9 @@ Repository layout, design decisions, and build order. No implementation yet.
 │   └── gold/
 │       ├── generation_5min.sql     # wide, dashboard-ready interval table
 │       ├── farm_daily.sql          # MWh, capacity factor, peak per farm per day
+│       ├── farm_revenue_daily.sql  # MWh x RRP: revenue and realised price
+│       ├── capture_price.sql       # capture price vs time-weighted average price
+│       ├── negative_price.sql      # intervals generating into a negative price
 │       ├── state_hourly.sql        # MW by state and NEM region
 │       └── fleet_monthly.sql       # fleet totals and records
 │
@@ -42,12 +45,13 @@ Repository layout, design decisions, and build order. No implementation yet.
 │   ├── reference/
 │   │   ├── wind_duids.csv          # DUID → farm name, state, region, capacity MW
 │   │   └── wind_duids.meta.json    # source, retrieval date, row count
-│   ├── bronze/date=YYYY-MM-DD/     # hour=HH.parquet (current day), day.parquet (closed)
+│   ├── bronze/
+│   │   ├── scada/_ingested.txt     # watermark, one source file name per line
+│   │   ├── scada/date=YYYY-MM-DD/  # one parquet per source file, write-once
+│   │   ├── price/_ingested.txt
+│   │   └── price/date=YYYY-MM-DD/
 │   ├── silver/date=YYYY-MM-DD.parquet
-│   ├── gold/*.parquet
-│   └── _state/
-│       ├── manifest.parquet        # one row per ingested source file
-│       └── runs.jsonl              # append-only run log: start, files, rows, duration
+│   └── gold/*.parquet
 │
 ├── docs/                           # GitHub Pages site (static, built from gold)
 │   ├── index.html
@@ -96,6 +100,24 @@ alone, or very roughly 150 MB a year of committed Parquet rather than 35 MB.
 That is affordable, and daily compaction plus zstd keeps it in check. If history
 growth becomes the binding constraint, moving the filter into the bronze write is
 the lever to pull.
+
+**Spot price is ingested alongside generation, not instead of it.** Generation
+alone measures volume. Joined to the regional reference price it measures
+economics: revenue per farm, capture price against the time-weighted average,
+and how often a farm is generating into a negative price — which is the
+commercially interesting question for Australian wind, and the one a former
+turbine engineer is well placed to ask. Both feeds are the same shape, so the
+second source cost one `ReportSpec`, not a second pipeline.
+
+**Bronze keeps intervention runs.** When AEMO intervenes it publishes both a
+physical and a pricing run for the same interval. Discarding one is a business
+decision, so bronze keeps both and silver resolves it.
+
+**FCAS price columns are not ingested.** They are eight separate ancillary
+service markets, irrelevant to wind energy revenue, and would quadruple the
+price table's width. This is the one place bronze is not perfectly faithful,
+and it is a one-way door: history written before the columns are added will not
+carry them.
 
 **Immutable files, because git history is append-only.** The expensive mistake
 here would be rewriting the current day's Parquet file on every run — 288
@@ -160,7 +182,7 @@ inspected.
 5. Build `data/reference/wind_duids.csv` from the AEMO registration list.
 6. `registry.py` to load it with validation, plus the refresh-and-diff workflow.
 
-**Phase 2 — Ingestion and bronze** — *done, see `scripts/ingest_scada.py`*
+**Phase 2 — Ingestion and bronze** — *done, see `scripts/`*
 7. List the AEMO directory, parse file names to interval timestamps, download
    and unpack with a timeout. ✓
 8. Watermark in `data/bronze/_ingested.txt`, one source file name per line, so
@@ -169,6 +191,8 @@ inspected.
    table) and write one Parquet file per source file, partitioned by NEM date. ✓
 10. Parser and bronze tests against CSV fixtures, including a multi-table
     report and a corrupt file. ✓
+11. Second source: `ingest_price.py` for DispatchIS `DISPATCH_PRICE`, sharing
+    the same core through a `ReportSpec`. ✓
 
 **Phase 3 — Silver and quality**
 11. `silver.py` + `sql/silver/`: cast types, deduplicate on
@@ -181,11 +205,12 @@ inspected.
 13. The four gold SQL models, run by `gold.py` as a full rewrite.
 14. Tests asserting known totals against a fixed fixture day.
 
-**Phase 5 — Automation**
-15. `ingest.yml`: hourly cron, run the CLI, commit data changes with `[skip ci]`,
-    concurrency group so runs cannot overlap.
-16. `compact.yml`: daily compaction of closed days.
-17. A one-off backfill run to seed history from whatever `Current/` holds, plus a
+**Phase 5 — Automation** — *ingest.yml and tests.yml done*
+15. `ingest.yml`: hourly cron at :07, both ingesters, commit with `[skip ci]`,
+    concurrency group so runs cannot overlap, rebase-and-retry on a push race. ✓
+16. `tests.yml`: ruff and pytest on Python 3.11 for every push and PR. ✓
+17. `compact.yml`: daily compaction of closed days.
+18. A one-off backfill run to seed history from whatever `Current/` holds, plus a
     note on extending it from AEMO's archive.
 
 **Phase 6 — Dashboard**

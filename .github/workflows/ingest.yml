@@ -1,0 +1,84 @@
+name: Ingest AEMO bronze
+
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "Max files per source (blank = all pending)"
+        required: false
+        default: "12"
+  schedule:
+    # Hourly at :07. One run picks up the twelve five-minute files published in
+    # the previous hour and makes a single commit, instead of 288 a day.
+    # Scheduled runs are best-effort and often late; the watermark backfills
+    # whatever was missed, so a skipped run is self-healing.
+    - cron: "7 * * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  # Two runs writing the watermark at once would race. Never cancel a run in
+  # flight: it may be between the Parquet write and the watermark append.
+  group: ingest-bronze
+  cancel-in-progress: false
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install --disable-pip-version-check .
+
+      - name: Ingest dispatch SCADA (wind MW)
+        run: python scripts/ingest_scada.py --limit "${LIMIT:-12}"
+        env:
+          LIMIT: ${{ inputs.limit }}
+
+      - name: Ingest dispatch price ($/MWh)
+        # Runs even if SCADA failed: the two sources are independent, each has
+        # its own watermark, and AEMO only retains about two days of files.
+        if: always()
+        run: python scripts/ingest_price.py --limit "${LIMIT:-12}"
+        env:
+          LIMIT: ${{ inputs.limit }}
+
+      - name: Commit new bronze files
+        if: always()
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if git diff --quiet --exit-code -- data/bronze; then
+            echo "No new bronze files."
+            exit 0
+          fi
+
+          git add data/bronze
+          scada=$(git diff --cached --name-only -- 'data/bronze/scada/**/*.parquet' | wc -l)
+          price=$(git diff --cached --name-only -- 'data/bronze/price/**/*.parquet' | wc -l)
+          git commit -m "data: bronze ingest (${scada} scada, ${price} price) [skip ci]"
+
+          # Another run may have landed while this one was downloading. Rebase
+          # rather than force: every bronze file is write-once, so the two
+          # commits touch disjoint paths and the rebase is conflict-free.
+          for attempt in 1 2 3; do
+            if git push; then
+              exit 0
+            fi
+            echo "Push failed (attempt ${attempt}); rebasing onto origin."
+            git pull --rebase --autostash
+            sleep $((attempt * 5))
+          done
+          echo "Could not push after 3 attempts." >&2
+          exit 1
