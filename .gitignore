@@ -28,3 +28,9 @@ htmlcov/
 .DS_Store
 .idea/
 .vscode/
+
+# Local virtualenv
+.venv/
+
+# Fixtures are data, not transient downloads
+!tests/fixtures/**

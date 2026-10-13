@@ -44,8 +44,8 @@ This project is not affiliated with AEMO.
 
 ## Status
 
-Planning. See [`PLAN.md`](PLAN.md) for the repository layout, design decisions,
-and build steps.
+Bronze layer built and tested. See [`PLAN.md`](PLAN.md) for the repository layout,
+design decisions, and build steps.
 
 ## Background
 

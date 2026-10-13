@@ -87,10 +87,15 @@ rather than framework-specific code.
 workspace, parsed, and discarded. AEMO's `Current/` directory only retains about
 two days of files, so the manifest plus the bronze layer is the durable record.
 
-**Wind filtering happens at the bronze write.** DISPATCH_SCADA carries every
-DUID in the NEM — several hundred units. Filtering to the ~80 wind DUIDs at the
-first write is what makes committing data back to the repo viable: roughly 23k
-rows per day instead of 150k.
+**Wind filtering happens at the silver boundary, not in bronze.** Bronze keeps
+every DUID exactly as published, so it stays replayable when the wind DUID
+registry changes — a new farm can be backfilled from existing bronze files
+instead of re-downloading from a directory that only retains two days. The cost
+is repo size: all ~500 DUIDs is roughly 150k rows per day against 23k for wind
+alone, or very roughly 150 MB a year of committed Parquet rather than 35 MB.
+That is affordable, and daily compaction plus zstd keeps it in check. If history
+growth becomes the binding constraint, moving the filter into the bronze write is
+the lever to pull.
 
 **Immutable files, because git history is append-only.** The expensive mistake
 here would be rewriting the current day's Parquet file on every run — 288
@@ -155,14 +160,15 @@ inspected.
 5. Build `data/reference/wind_duids.csv` from the AEMO registration list.
 6. `registry.py` to load it with validation, plus the refresh-and-diff workflow.
 
-**Phase 2 — Ingestion and bronze**
-7. `sources/nemweb.py`: list the directory, parse filenames to timestamps,
-   download and unpack with retries and a timeout.
-8. `state.py`: read and write the manifest; compute the set of pending files.
-9. `bronze.py`: parse the AEMO CSV format (nested `I`/`D` record rows), filter to
-   wind DUIDs, write one Parquet file per closed UTC hour.
-10. Tests against trimmed fixture zips, including a malformed file and a file
-    containing a DUID absent from the registry.
+**Phase 2 — Ingestion and bronze** — *done, see `scripts/ingest_scada.py`*
+7. List the AEMO directory, parse file names to interval timestamps, download
+   and unpack with a timeout. ✓
+8. Watermark in `data/bronze/_ingested.txt`, one source file name per line, so
+   re-runs skip what is already ingested. ✓
+9. Parse the nested AEMO CSV (`C`/`I`/`D` row markers, headers tracked per
+   table) and write one Parquet file per source file, partitioned by NEM date. ✓
+10. Parser and bronze tests against CSV fixtures, including a multi-table
+    report and a corrupt file. ✓
 
 **Phase 3 — Silver and quality**
 11. `silver.py` + `sql/silver/`: cast types, deduplicate on

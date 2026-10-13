@@ -35,19 +35,23 @@ repo should read as production-minded work, not a notebook dump.
 | Layer  | Content | Committed | Grain |
 |--------|---------|-----------|-------|
 | raw    | Downloaded `PUBLIC_DISPATCHSCADA_*.zip` | No (gitignored) | per 5-min file |
-| bronze | Wind DUIDs only, source columns unchanged | Yes | one file per UTC hour |
-| silver | Typed, deduplicated, validated, UTC + NEM local time | Yes | one file per day |
+| bronze | All DUIDs, source columns unchanged | Yes | one file per source file |
+| silver | Wind only. Typed, deduplicated, validated, UTC + NEM local time | Yes | one file per day |
 | gold   | Aggregates and dashboard-ready tables | Yes | whole-table rewrite |
 
 Rules that follow from this:
 
-- Filter to wind DUIDs at the bronze write. Nothing downstream ever sees a
-  non-wind unit.
-- Bronze and silver files are immutable once their period has closed. Never
-  rewrite a closed file — a rewritten file is a new blob in git history forever.
-  Gold is small enough to rewrite in full each run.
-- Every write is idempotent and keyed off the ingestion manifest in
-  `data/_state/`. Re-running a job must not duplicate rows or change outputs.
+- Bronze is a faithful copy of the source: every DUID, columns untouched, no
+  business logic. The wind filter belongs at the silver boundary, so bronze
+  stays replayable if the DUID registry changes.
+- Bronze and silver files are immutable once written. Never rewrite one — a
+  rewritten file is a new blob in git history forever, and a file rewritten
+  every run makes the repository grow without bound. Gold is small enough
+  (hundreds of KB) to rewrite in full each run.
+- Every write is idempotent and keyed off a watermark: bronze uses
+  `data/bronze/_ingested.txt`, one source file name per line, appended only
+  after a successful Parquet write. Re-running a job must not duplicate rows or
+  change existing files.
 
 ## Conventions
 
