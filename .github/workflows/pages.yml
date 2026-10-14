@@ -68,6 +68,7 @@ jobs:
         run: |
           echo "docs/data:"
           ls -la docs/data
+          echo "per-farm files: $(ls docs/data/farm 2>/dev/null | wc -l)"
           echo "total: $(du -sh docs | cut -f1)"
 
       # Pages must already be enabled on the repository, once, by hand:

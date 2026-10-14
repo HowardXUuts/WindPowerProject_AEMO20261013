@@ -1,0 +1,474 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wind Farm Detail</title>
+<meta name="description" content="Per-farm wind generation, capture price and negative-price exposure from AEMO 5-minute dispatch data.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>%F0%9F%8C%AC</text></svg>">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>Wind Farm Detail</h1>
+    <p>One farm at a time: what it yielded, what it earned, and when.
+       <a href="https://github.com/HowardXUuts/WindPowerProject_AEMO20261013">Source</a></p>
+  </header>
+
+  <nav class="pages" aria-label="Pages">
+    <a href="index.html">Fleet overview</a>
+    <a href="farm.html" aria-current="page">Farm detail</a>
+  </nav>
+
+  <section class="filters" aria-label="Farm picker">
+    <div class="field">
+      <label for="region-pick">Region</label>
+      <select id="region-pick"><option value="">All regions</option></select>
+    </div>
+    <div class="field grow">
+      <label for="farm-pick">Wind farm</label>
+      <select id="farm-pick"><option value="">Loading&hellip;</option></select>
+    </div>
+    <div class="field">
+      <label for="sort-pick">Order by</label>
+      <select id="sort-pick">
+        <option value="name">Name</option>
+        <option value="revenue_per_mw_day">Revenue per MW</option>
+        <option value="capacity_factor">Capacity factor</option>
+        <option value="capacity_mw">Installed capacity</option>
+        <option value="negative_pct">Negative-price share</option>
+      </select>
+    </div>
+  </section>
+
+  <section class="tiles" id="farm-tiles" aria-label="Farm scorecard"></section>
+
+  <p class="hint" id="farm-caption"></p>
+
+  <section class="panel">
+    <div class="panel-head">
+      <div>
+        <h2>When it generates, and when its region pays</h2>
+        <p class="note">Averaged by hour of day over the last 14 days. A farm is paid the
+           price of the interval it generates in, so the shape of the top chart against the
+           shape of the bottom one is what decides its revenue &mdash; not its capacity
+           factor. Two measures of different scale, so two charts on a shared hour axis.</p>
+      </div>
+      <button class="toggle" data-target="shape-table" aria-pressed="false">Table</button>
+    </div>
+    <div class="pair">
+      <div class="chart"><canvas id="shape-mw-chart"></canvas></div>
+      <p class="sub-label">Average output, MW</p>
+      <div class="chart"><canvas id="shape-rrp-chart"></canvas></div>
+      <p class="sub-label">Average regional price, $/MWh</p>
+    </div>
+    <div class="tablewrap" id="shape-table" hidden></div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <div>
+        <h2>Five-minute output, most recent complete day</h2>
+        <p class="note" id="profile-note">Dispatch SCADA at full resolution: ramps, lulls and
+           any interval where the farm was constrained off.</p>
+      </div>
+      <button class="toggle" data-target="profile-table" aria-pressed="false">Table</button>
+    </div>
+    <div class="pair">
+      <div class="chart"><canvas id="profile-mw-chart"></canvas></div>
+      <p class="sub-label">Output, MW</p>
+      <div class="chart"><canvas id="profile-rrp-chart"></canvas></div>
+      <p class="sub-label">Regional price, $/MWh</p>
+    </div>
+    <div class="tablewrap" id="profile-table" hidden></div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <div>
+        <h2>Daily record</h2>
+        <p class="note">Capture ratio below 1.0 means the farm earned less per MWh than
+           the regional average that day. A short day is marked, so a sealed part-day is
+           never mistaken for a calm one.</p>
+      </div>
+    </div>
+    <div class="tablewrap" id="daily-table"></div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <div>
+        <h2>Where it sits in the fleet</h2>
+        <p class="note">Every farm ranked by the measure chosen above, with this one marked.
+           Capacity factor and revenue per MW rarely agree.</p>
+      </div>
+      <button class="toggle" data-target="rank-table" aria-pressed="false">Table</button>
+    </div>
+    <div class="chart tall"><canvas id="rank-chart"></canvas></div>
+    <div class="tablewrap" id="rank-table" hidden></div>
+  </section>
+
+  <footer>
+    <p id="footer-meta">Loading&hellip;</p>
+    <p>Data &copy; AEMO, used under its
+       <a href="https://aemo.com.au/privacy-and-legal-notices/copyright-permissions">copyright permissions</a>.
+       This project is not affiliated with AEMO.</p>
+  </footer>
+
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="app.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  var W = window.WIND;
+  var css = W.css, colourOf = W.colourOf, num = W.num, money = W.money, pct = W.pct;
+  var plot = W.plot, axis = W.axis, table = W.table, esc = W.escapeHtml;
+  var charting = W.charting, get = W.get, fail = W.fail;
+  W.wireToggles();
+
+  // Output and price are the two series on this page, everywhere. Fixed so the
+  // eye learns them once: blue is always megawatts, orange always dollars.
+  var money2 = function (value) {
+    if (value === null || value === undefined) return "\u2014";
+    return (value < 0 ? "-$" : "$") + num(Math.abs(value), 2);
+  };
+
+  var MW_COLOUR = function () { return css("--series-1"); };
+  var RRP_COLOUR = function () { return css("--series-2"); };
+
+  var index = [];
+  var cache = {};
+  var current = null;
+
+  var regionPick = document.getElementById("region-pick");
+  var farmPick = document.getElementById("farm-pick");
+  var sortPick = document.getElementById("sort-pick");
+
+  var LABELS = {
+    name: "Name",
+    revenue_per_mw_day: "Revenue per MW per day",
+    capacity_factor: "Capacity factor",
+    capacity_mw: "Installed capacity",
+    negative_pct: "Negative-price share"
+  };
+
+  function sorted(rows, key) {
+    var out = rows.slice();
+    if (key === "name") {
+      out.sort(function (a, b) { return a.station_name.localeCompare(b.station_name); });
+    } else {
+      out.sort(function (a, b) {
+        var x = a[key], y = b[key];
+        if (x === null || x === undefined) return 1;
+        if (y === null || y === undefined) return -1;
+        return y - x;
+      });
+    }
+    return out;
+  }
+
+  function visible() {
+    var region = regionPick.value;
+    return index.filter(function (r) { return !region || r.region === region; });
+  }
+
+  function fillFarmPick() {
+    var rows = sorted(visible(), sortPick.value);
+    farmPick.innerHTML = rows.map(function (r) {
+      return '<option value="' + esc(r.duid) + '">' + esc(r.station_name) +
+             " · " + esc(r.region) + "</option>";
+    }).join("");
+    if (rows.length && !rows.some(function (r) { return r.duid === farmPick.value; })) {
+      farmPick.value = rows[0].duid;
+    }
+    return rows;
+  }
+
+  /* ---- scorecard -------------------------------------------------------- */
+  function renderTiles(farm) {
+    var negClass = farm.negative_pct > 10 ? " bad" : "";
+    document.getElementById("farm-tiles").innerHTML = [
+      '<div class="tile"><div class="label">Capacity factor</div>' +
+        '<div class="value">' + pct(farm.capacity_factor) + "</div>" +
+        '<div class="sub">' + num(farm.capacity_mw, 1) + " MW installed</div></div>",
+      '<div class="tile"><div class="label">Capture price</div>' +
+        // Two decimals, not none: a capture price of $6.47 shown as "6" loses
+        // the number, and near zero is exactly where this market lives.
+        '<div class="value">' + money2(farm.capture_price_aud_mwh) + "</div>" +
+        '<div class="sub">$/MWh actually earned</div></div>',
+      '<div class="tile"><div class="label">Revenue per MW</div>' +
+        '<div class="value">' + money(farm.revenue_per_mw_day) + "</div>" +
+        '<div class="sub">per MW installed, per day</div></div>',
+      '<div class="tile"><div class="label">Negative-price share</div>' +
+        '<div class="value' + negClass + '">' + num(farm.negative_pct, 1) + "%</div>" +
+        '<div class="sub">of output sold below zero</div></div>'
+    ].join("");
+
+    document.getElementById("farm-caption").innerHTML =
+      "<strong>" + esc(farm.station_name) + "</strong> (" + esc(farm.duid) + ", " +
+      esc(farm.region) + ") &middot; " + num(farm.energy_mwh, 0) + " MWh over " +
+      farm.days + " day" + (farm.days === 1 ? "" : "s") +
+      " &middot; peak " + num(farm.peak_pct_of_capacity, 0) + "% of nameplate" +
+      (farm.all_days_complete ? "" :
+        ' &middot; <span class="bad">includes a short day</span>');
+  }
+
+  /* ---- the paired shape charts ------------------------------------------ */
+  function lineChart(id, labels, values, colour, unit, digits) {
+    plot(id, {
+      type: "line",
+      data: {
+        labels: labels,
+        datasets: [{
+          label: unit,
+          data: values,
+          borderColor: colour, backgroundColor: colour,
+          borderWidth: 2, pointRadius: 0, pointHoverRadius: 5, tension: 0.25
+        }]
+      },
+      options: {
+        interaction: { mode: "index", intersect: false },
+        plugins: {
+          // One series per chart, so no legend box: the sub-label under each
+          // chart names the measure, and identity is never colour alone.
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: function (c) {
+                return (c.parsed.y === null ? "—" : num(c.parsed.y, digits)) + " " + unit;
+              }
+            }
+          }
+        },
+        scales: {
+          x: axis({ ticks: { color: css("--text-muted"), maxTicksLimit: 12, autoSkip: true } }),
+          y: axis({ ticks: { color: css("--text-muted") } })
+        }
+      }
+    });
+  }
+
+  function renderShape(shape) {
+    var hours = shape.map(function (r) { return r.hour; });
+    lineChart("shape-mw-chart", hours, shape.map(function (r) { return r.avg_mw; }),
+              MW_COLOUR(), "MW", 1);
+    lineChart("shape-rrp-chart", hours, shape.map(function (r) { return r.avg_rrp; }),
+              RRP_COLOUR(), "$/MWh", 2);
+
+    table(document.getElementById("shape-table"),
+      [{ label: "Hour (NEM)", get: function (r) { return r.hour; } },
+       { label: "Avg MW", num: true, get: function (r) { return num(r.avg_mw, 1); } },
+       { label: "Avg $/MWh", num: true, get: function (r) { return num(r.avg_rrp, 2); } },
+       { label: "Intervals", num: true, get: function (r) { return r.intervals; } }],
+      shape);
+  }
+
+  function renderProfile(profile) {
+    var note = document.getElementById("profile-note");
+    if (!profile.length) {
+      note.textContent = "No complete trading day yet for this farm.";
+      return;
+    }
+    var times = profile.map(function (r) { return r.t; });
+    note.textContent = "Dispatch SCADA at full resolution for " + profile[0].trading_date +
+      " (NEM time): ramps, lulls and any interval where the farm was constrained off.";
+
+    lineChart("profile-mw-chart", times, profile.map(function (r) { return r.mw; }),
+              MW_COLOUR(), "MW", 1);
+    lineChart("profile-rrp-chart", times, profile.map(function (r) { return r.rrp; }),
+              RRP_COLOUR(), "$/MWh", 2);
+
+    table(document.getElementById("profile-table"),
+      [{ label: "Time (NEM)", get: function (r) { return r.t; } },
+       { label: "MW", num: true, get: function (r) { return num(r.mw, 1); } },
+       { label: "$/MWh", num: true, get: function (r) { return num(r.rrp, 2); } }],
+      profile);
+  }
+
+  function renderDaily(daily) {
+    table(document.getElementById("daily-table"),
+      [{ label: "Date", get: function (r) { return r.trading_date + (r.is_complete ? "" : " *"); } },
+       { label: "MWh", num: true, get: function (r) { return num(r.energy_mwh, 1); } },
+       { label: "Capacity factor", num: true, get: function (r) { return pct(r.capacity_factor); } },
+       { label: "Peak MW", num: true, get: function (r) { return num(r.peak_mw, 1); } },
+       { label: "Revenue", num: true, get: function (r) { return money(r.revenue_aud); } },
+       { label: "$/MW/day", num: true, get: function (r) { return money(r.revenue_per_mw_day); } },
+       { label: "Capture $/MWh", num: true, get: function (r) { return num(r.capture_price_aud_mwh, 2); } },
+       { label: "TWAP $/MWh", num: true, get: function (r) { return num(r.twap_aud_mwh, 2); } },
+       { label: "Capture ratio", num: true, get: function (r) {
+           return r.capture_ratio === null || r.capture_ratio === undefined
+             ? "—" : r.capture_ratio.toFixed(3); } },
+       { label: "Negative MWh", num: true, get: function (r) { return num(r.negative_mwh, 1); } },
+       { label: "Intervals", num: true, get: function (r) { return r.intervals + " / 288"; } }],
+      daily);
+  }
+
+  /* ---- fleet ranking, with this farm marked ----------------------------- */
+  var ENDS = 12;
+
+  function renderRank(duid) {
+    var key = sortPick.value === "name" ? "revenue_per_mw_day" : sortPick.value;
+    var ranked = sorted(visible(), key).filter(function (r) {
+      return r[key] !== null && r[key] !== undefined;
+    });
+    ranked.forEach(function (r, i) { r.__rank = i + 1; });
+
+    // 96 bars in one chart is 4 pixels each and no readable label. Show the
+    // two ends, which is where a comparison actually lives, and splice the
+    // selected farm in when it sits in the middle so it is never missing from
+    // its own page. The table below carries the full list.
+    var rows = ranked;
+    var elided = 0;
+    if (ranked.length > ENDS * 2 + 1) {
+      var head = ranked.slice(0, ENDS);
+      var tail = ranked.slice(-ENDS);
+      var middle = ranked.slice(ENDS, ranked.length - ENDS);
+      var picked = middle.filter(function (r) { return r.duid === duid; });
+      elided = middle.length - picked.length;
+      rows = head.concat(picked, tail);
+    }
+
+    var label = LABELS[key];
+    var isPct = key === "capacity_factor";
+    var isMoney = key === "revenue_per_mw_day";
+
+    plot("rank-chart", {
+      type: "bar",
+      data: {
+        labels: rows.map(function (r) { return r.station_name; }),
+        datasets: [{
+          label: label,
+          data: rows.map(function (r) { return r[key]; }),
+          // The selected farm keeps its region colour; every other bar is
+          // recessive. Colour marks the subject, not a rank.
+          backgroundColor: rows.map(function (r) {
+            return r.duid === duid ? colourOf(r.region) : css("--grid");
+          }),
+          borderWidth: 0, borderRadius: 4, borderSkipped: "start"
+        }]
+      },
+      options: {
+        indexAxis: "y",
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: function (c) {
+                var row = rows[c.dataIndex];
+                var v = isPct ? pct(row[key]) : isMoney ? money(row[key]) : num(row[key], 1);
+                return row.region + " · " + label + " " + v;
+              }
+            }
+          }
+        },
+        scales: {
+          x: axis({
+            beginAtZero: true,
+            ticks: {
+              color: css("--text-muted"),
+              callback: function (v) { return isPct ? (v * 100).toFixed(0) + "%" : isMoney ? money(v) : v; }
+            }
+          }),
+          y: axis({ grid: { display: false }, ticks: { color: css("--text-muted"), autoSkip: false, font: { size: 9 } } })
+        }
+      }
+    });
+
+    var mine = ranked.filter(function (r) { return r.duid === duid; })[0];
+    var caption = document.querySelector("#rank-chart");
+    var note = caption.closest(".panel").querySelector(".note");
+    note.textContent = "Every farm ranked by " + label.toLowerCase() + ", with this one marked." +
+      (mine ? " " + mine.station_name + " is " + mine.__rank + " of " + ranked.length + "." : "") +
+      (elided ? " The " + elided + " farms between the top and bottom " + ENDS +
+                " are in the table rather than the chart." : "");
+
+    table(document.getElementById("rank-table"),
+      [{ label: "#", num: true, get: function (r) { return r.__rank; } },
+       { label: "Farm", get: function (r) {
+           return (r.duid === duid ? "<strong>" : "") +
+                  '<span class="dot" style="background:' + colourOf(r.region) + '"></span>' +
+                  esc(r.station_name) + (r.duid === duid ? "</strong>" : ""); } },
+       { label: "Region", get: function (r) { return esc(r.region); } },
+       { label: "MW", num: true, get: function (r) { return num(r.capacity_mw, 1); } },
+       { label: "Capacity factor", num: true, get: function (r) { return pct(r.capacity_factor); } },
+       { label: "$/MW/day", num: true, get: function (r) { return money(r.revenue_per_mw_day); } },
+       { label: "Negative %", num: true, get: function (r) { return num(r.negative_pct, 2); } }],
+      ranked);
+  }
+
+  /* ---- selection -------------------------------------------------------- */
+  function show(duid) {
+    var farm = index.filter(function (r) { return r.duid === duid; })[0];
+    if (!farm) return;
+    current = duid;
+
+    // The chosen farm goes in the URL so a page can be linked and reloaded on
+    // the same farm rather than snapping back to the first in the list.
+    try {
+      var url = new URL(window.location.href);
+      url.searchParams.set("duid", duid);
+      window.history.replaceState({}, "", url);
+    } catch (e) { /* older browsers: the page still works, just not linkable */ }
+
+    renderTiles(farm);
+    renderRank(duid);
+
+    var render = function (detail) {
+      renderShape(detail.shape || []);
+      renderProfile(detail.profile || []);
+      renderDaily(detail.daily || []);
+    };
+
+    if (cache[duid]) { render(cache[duid]); return; }
+    get("farm/" + duid).then(function (detail) {
+      cache[duid] = detail;
+      if (current === duid) { render(detail); }
+    }).catch(function (error) { fail(error.message); });
+  }
+
+  regionPick.addEventListener("change", function () { show(fillFarmPick()[0].duid); });
+  sortPick.addEventListener("change", function () {
+    var keep = farmPick.value;
+    fillFarmPick();
+    farmPick.value = keep;
+    show(keep);
+  });
+  farmPick.addEventListener("change", function () { show(farmPick.value); });
+
+  Promise.all([get("farm_index"), get("meta")]).then(function (all) {
+    index = all[0] || [];
+    var meta = all[1] || {};
+    if (!index.length) {
+      fail("the farm index is empty — has the gold layer been built?");
+      return;
+    }
+
+    var regions = Array.from(new Set(index.map(function (r) { return r.region; }))).sort();
+    regionPick.innerHTML = '<option value="">All regions</option>' +
+      regions.map(function (r) { return '<option value="' + esc(r) + '">' + esc(r) + "</option>"; }).join("");
+
+    var wanted = null;
+    try { wanted = new URL(window.location.href).searchParams.get("duid"); } catch (e) { wanted = null; }
+    var match = index.filter(function (r) { return r.duid === wanted; })[0];
+    if (match) { regionPick.value = ""; }
+
+    var rows = fillFarmPick();
+    var pick = match ? match.duid : rows[0].duid;
+    farmPick.value = pick;
+
+    if (!charting) { W.chartsUnavailable(); }
+
+    document.getElementById("footer-meta").textContent =
+      index.length + " farms · generated " + (meta.generated_at || "—") + ".";
+
+    show(pick);
+  }).catch(function (error) { fail(error.message); });
+})();
+</script>
+</body>
+</html>
