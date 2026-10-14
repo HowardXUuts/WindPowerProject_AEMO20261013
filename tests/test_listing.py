@@ -9,7 +9,7 @@ actually uses, and an empty match set being an error rather than a no-op.
 from datetime import datetime
 
 import pytest
-from ingest_price import PRICE
+from ingest_dispatchis import DISPATCHIS as PRICE
 from ingest_scada import SCADA
 from nemweb import NEM_TZ, ListingError, interval_from_filename, list_remote_files
 

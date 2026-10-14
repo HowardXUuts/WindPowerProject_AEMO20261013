@@ -58,23 +58,64 @@ class ListingError(Exception):
 
 @dataclass(frozen=True)
 class Column:
-    """One bronze column, and how to get it from an AEMO source column."""
+    """One bronze column, and how to get it from an AEMO source column.
+
+    ``optional`` is for columns AEMO added at some point in the report's life
+    and may not emit: an optional column that is absent becomes NULL and is
+    logged, rather than failing the file. Everything else is required, because
+    a silently missing column is a column of nulls nobody notices.
+    """
 
     name: str
     sql_type: str
     source: str
     parse: Callable[[str], object]
+    optional: bool = False
+
+
+@dataclass(frozen=True)
+class Horizon:
+    """Keep only the nearest ``periods`` intervals of each forecast run.
+
+    PredispatchIS publishes out to about 40 hours, which is 79 half-hour
+    periods per run every half hour. The model only uses the near horizon, and
+    keeping the rest would cost twenty times the rows for features nothing
+    reads.
+    """
+
+    run_time: str  # bronze column holding when AEMO issued the run
+    interval: str  # bronze column holding the interval the row forecasts
+    periods: int
+
+
+@dataclass(frozen=True)
+class TableSpec:
+    """One table inside a report, and the bronze table it becomes."""
+
+    key: str  # bronze subdirectory and watermark name, e.g. "price"
+    table: str  # table inside the report, e.g. "DISPATCH_PRICE"
+    columns: tuple[Column, ...]
+    horizon: Horizon | None = None
 
 
 @dataclass(frozen=True)
 class ReportSpec:
-    """Everything that distinguishes one NEMWeb report from another."""
+    """One NEMWeb report: a directory of zips, and the tables taken from them.
 
-    key: str  # bronze subdirectory, e.g. "scada"
+    A report can yield several bronze tables. DispatchIS carries the regional
+    price, the regional demand summary and the interconnector flows in a single
+    zip, so they are declared together and the zip is downloaded once. Each
+    table still keeps its own watermark and its own bronze directory, so one
+    falling behind or failing to parse never holds up another.
+    """
+
     url: str
     file_prefix: str  # e.g. "PUBLIC_DISPATCHSCADA"
-    table: str  # table inside the report, e.g. "DISPATCH_UNIT_SCADA"
-    columns: tuple[Column, ...]
+    tables: tuple[TableSpec, ...]
+
+    @property
+    def keys(self) -> tuple[str, ...]:
+        return tuple(table.key for table in self.tables)
 
     @property
     def filename_re(self) -> re.Pattern[str]:
@@ -175,23 +216,67 @@ def parse_aemo_csv(text: str) -> Iterator[tuple[str, dict[str, str]]]:
         yield f"{key[0]}_{key[1]}", dict(zip(header, values[: len(header)], strict=True))
 
 
-def extract_rows(spec: ReportSpec, text: str, source_file: str) -> list[tuple]:
-    """Return bronze rows for a report's table of interest."""
+def extract_rows(spec: TableSpec, text: str, source_file: str) -> list[tuple]:
+    """Return bronze rows for one table of a report."""
     ingested_at = datetime.now(UTC)
     rows: list[tuple] = []
+    absent: set[str] = set()
 
     for table, record in parse_aemo_csv(text):
         if table.upper() != spec.table:
             continue
-        try:
-            values = [column.parse(record[column.source]) for column in spec.columns]
-        except KeyError as exc:
-            raise ParseError(f"{spec.table} row missing column {exc}") from exc
+        values = []
+        for column in spec.columns:
+            if column.source in record:
+                values.append(column.parse(record[column.source]))
+            elif column.optional:
+                absent.add(column.source)
+                values.append(None)
+            else:
+                # Naming the columns AEMO did send turns a wrong guess at a
+                # column name into a one-line fix instead of an investigation.
+                raise ParseError(
+                    f"{spec.table} in {source_file} has no column {column.source!r}. "
+                    f"It has: {', '.join(sorted(record))}"
+                )
         rows.append((*values, source_file, ingested_at))
 
+    if absent:
+        LOG.warning(
+            "[%s] optional column(s) absent from %s, written as NULL: %s",
+            spec.key, source_file, ", ".join(sorted(absent)),
+        )
     if not rows:
         raise ParseError(f"no {spec.table} rows found in {source_file}")
-    return rows
+    return apply_horizon(spec, rows)
+
+
+def apply_horizon(spec: TableSpec, rows: list[tuple]) -> list[tuple]:
+    """Trim each forecast run to the nearest ``periods`` intervals it covers.
+
+    The trim is per run, not per file: one PredispatchIS file holds exactly one
+    run, but keeping the rule per run means a file that ever held two is still
+    trimmed correctly rather than losing the second run's near horizon.
+    """
+    horizon = spec.horizon
+    if horizon is None:
+        return rows
+
+    names = [column.name for column in spec.columns]
+    try:
+        run_at = names.index(horizon.run_time)
+        interval_at = names.index(horizon.interval)
+    except ValueError as exc:  # a horizon naming a column the table lacks
+        raise ParseError(f"{spec.key}: horizon column not in table: {exc}") from exc
+
+    keep_by_run: dict[object, set] = {}
+    for row in rows:
+        keep_by_run.setdefault(row[run_at], set()).add(row[interval_at])
+    nearest = {
+        run: set(sorted(intervals)[: horizon.periods])
+        for run, intervals in keep_by_run.items()
+    }
+    return [row for row in rows if row[interval_at] in nearest[row[run_at]]]
 
 
 def read_zip_payload(payload: bytes, source_file: str) -> str:
@@ -208,11 +293,11 @@ def read_zip_payload(payload: bytes, source_file: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def watermark_path(spec: ReportSpec, bronze_dir: Path = BRONZE_DIR) -> Path:
-    """Return the watermark path for a report.
+def watermark_path(spec: TableSpec, bronze_dir: Path = BRONZE_DIR) -> Path:
+    """Return the watermark path for one bronze table.
 
-    Each report keeps its own watermark, so one source failing or falling behind
-    never blocks the other.
+    Each table keeps its own watermark, so one source failing or falling behind
+    never blocks another — including two tables that share a download.
     """
     return bronze_dir / spec.key / WATERMARK_NAME
 
@@ -285,7 +370,7 @@ def download(spec: ReportSpec, client: httpx.Client, name: str) -> bytes:
 # ---------------------------------------------------------------------------
 
 
-def bronze_ddl(spec: ReportSpec) -> str:
+def bronze_ddl(spec: TableSpec) -> str:
     """Return the CREATE TABLE statement for a report's bronze schema."""
     columns = [f"{column.name} {column.sql_type}" for column in spec.columns]
     columns += ["source_file VARCHAR", "ingested_at TIMESTAMPTZ"]
@@ -297,13 +382,13 @@ def hour_of(moment: datetime) -> datetime:
     return moment.replace(minute=0, second=0, microsecond=0)
 
 
-def bronze_path(spec: ReportSpec, hour: datetime, bronze_dir: Path = BRONZE_DIR) -> Path:
+def bronze_path(spec: TableSpec, hour: datetime, bronze_dir: Path = BRONZE_DIR) -> Path:
     """Return the Parquet path for one closed NEM hour."""
     partition = f"date={hour.date().isoformat()}"
     return bronze_dir / spec.key / partition / f"hour={hour:%H}.parquet"
 
 
-def write_bronze(spec: ReportSpec, rows: list[tuple], destination: Path) -> int:
+def write_bronze(spec: TableSpec, rows: list[tuple], destination: Path) -> int:
     """Write bronze rows to Parquet and return the row count."""
     destination.parent.mkdir(parents=True, exist_ok=True)
     literal = str(destination).replace("'", "''")
@@ -324,7 +409,7 @@ def write_bronze(spec: ReportSpec, rows: list[tuple], destination: Path) -> int:
 
 
 def ingest_hour(
-    spec: ReportSpec,
+    spec: TableSpec,
     hour: datetime,
     payloads: list[tuple[str, bytes]],
     bronze_dir: Path = BRONZE_DIR,
@@ -422,80 +507,118 @@ def run(
     list_only: bool = False,
     bronze_dir: Path = BRONZE_DIR,
 ) -> int:
-    """Ingest all closed, un-ingested hours. Returns the number of hours written."""
-    watermark = watermark_path(spec, bronze_dir)
-    ingested = load_watermark(watermark)
-    LOG.info("[%s] watermark holds %d previously ingested files", spec.key, len(ingested))
+    """Ingest all closed, un-ingested hours for every table. Returns hours written.
+
+    One pass over the report's files serves every table it declares. The zip is
+    downloaded and unzipped once per source file; each table then decides for
+    itself, from its own watermark, whether it still needs that hour. A table
+    that fails to parse is logged and skipped without disturbing the others,
+    because they do not share a watermark — only a download.
+    """
+    state = {table.key: load_watermark(watermark_path(table, bronze_dir)) for table in spec.tables}
+    for table in spec.tables:
+        LOG.info("[%s] watermark holds %d previously ingested files", table.key,
+                 len(state[table.key]))
 
     headers = {"User-Agent": USER_AGENT}
     with httpx.Client(timeout=HTTP_TIMEOUT, headers=headers, follow_redirects=True) as client:
         available = list_remote_files(spec, client)
-        pending = pending_files(spec, available, ingested)
-        hours = select_closed_hours(spec, pending, available, limit)
-        LOG.info(
-            "[%s] %d listed, %d pending, %d closed hours selected",
-            spec.key,
-            len(available),
-            len(pending),
-            len(hours),
-        )
+
+        wanted: dict[str, list[tuple[datetime, list[str]]]] = {}
+        for table in spec.tables:
+            pending = pending_files(spec, available, state[table.key])
+            wanted[table.key] = select_closed_hours(spec, pending, available, limit)
+            LOG.info("[%s] %d listed, %d pending, %d closed hours selected",
+                     table.key, len(available), len(pending), len(wanted[table.key]))
 
         if list_only:
-            for hour, files in hours:
-                print(f"{hour:%Y-%m-%d %H}:00  {len(files)} files")
+            for table in spec.tables:
+                for hour, files in wanted[table.key]:
+                    print(f"{table.key:16} {hour:%Y-%m-%d %H}:00  {len(files)} files")
             return 0
+
+        # The union of what the tables want, so a file is fetched once even when
+        # two tables are at different points in the backlog.
+        hours: dict[datetime, list[str]] = {}
+        for selected in wanted.values():
+            for hour, files in selected:
+                hours.setdefault(hour, files)
         if not hours:
-            LOG.info("[%s] nothing to ingest", spec.key)
+            LOG.info("[%s] nothing to ingest", spec.file_prefix)
             return 0
 
-        done: list[str] = []
-        total_rows = 0
+        done: dict[str, list[str]] = {table.key: [] for table in spec.tables}
+        rows_by_key: dict[str, int] = dict.fromkeys(done, 0)
         written = 0
-        for hour, files in hours:
-            destination = bronze_path(spec, hour, bronze_dir)
-            if destination.exists():
-                # Write-once: an existing file means this hour is already done.
-                LOG.warning("[%s] %s exists, skipping", spec.key, destination.name)
-                done.extend(files)
+
+        for hour in sorted(hours):
+            files = hours[hour]
+            due = [
+                table for table in spec.tables
+                if any(hour == h for h, _ in wanted[table.key])
+                and not bronze_path(table, hour, bronze_dir).exists()
+            ]
+            for table in spec.tables:
+                if table not in due and any(hour == h for h, _ in wanted[table.key]):
+                    # Write-once: the file exists, so this hour is already done.
+                    LOG.warning("[%s] %s exists, skipping", table.key,
+                                bronze_path(table, hour, bronze_dir).name)
+                    done[table.key].extend(files)
+            if not due:
                 continue
 
-            payloads: list[tuple[str, bytes]] = []
             try:
-                for name in files:
-                    payloads.append((name, download(spec, client, name)))
-                _, count = ingest_hour(spec, hour, payloads, bronze_dir)
-            except (httpx.HTTPError, ParseError, zipfile.BadZipFile) as exc:
-                # Leave the whole hour un-watermarked so the next run retries it
-                # in full, rather than committing a partial hour.
-                LOG.warning("[%s] skipping hour %s: %s", spec.key, f"{hour:%Y-%m-%d %H}", exc)
+                texts = [
+                    (name, read_zip_payload(download(spec, client, name), name))
+                    for name in files
+                ]
+            except (httpx.HTTPError, zipfile.BadZipFile, ParseError) as exc:
+                # The download is shared, so a failure here costs every table
+                # this hour. They retry it together on the next run.
+                LOG.warning("[%s] skipping hour %s: %s", spec.file_prefix,
+                            f"{hour:%Y-%m-%d %H}", exc)
                 continue
 
-            LOG.info(
-                "[%s] wrote %s from %d files (%d rows)",
-                spec.key,
-                destination.relative_to(bronze_dir),
-                len(files),
-                count,
-            )
-            done.extend(files)
-            total_rows += count
-            written += 1
+            hour_written = False
+            for table in due:
+                try:
+                    rows: list[tuple] = []
+                    for name, text in texts:
+                        rows.extend(extract_rows(table, text, name))
+                    destination = bronze_path(table, hour, bronze_dir)
+                    count = write_bronze(table, rows, destination)
+                except ParseError as exc:
+                    # One table's schema moving must not cost the others their
+                    # hour: AEMO retains about two days and the data is gone.
+                    LOG.warning("[%s] skipping hour %s: %s", table.key,
+                                f"{hour:%Y-%m-%d %H}", exc)
+                    continue
 
-        stale = stale_hours(spec, available, ingested | set(done))
-        if stale:
-            # The failure this catches is silent by nature: a run that writes
-            # one hour and leaves ten behind exits 0 and commits real data.
-            # AEMO retains about two days, so hours left in a closed window are
-            # on a clock, and the only symptom is a log line nobody reads
-            # unless it says so.
-            LOG.warning(
-                "[%s] %d closed hour(s) left un-ingested, oldest %s. "
-                "AEMO retains about two days; these will be lost if not picked up.",
-                spec.key,
-                len(stale),
-                f"{stale[0]:%Y-%m-%d %H}:00",
-            )
+                LOG.info("[%s] wrote %s from %d files (%d rows)", table.key,
+                         destination.relative_to(bronze_dir), len(files), count)
+                done[table.key].extend(files)
+                rows_by_key[table.key] += count
+                hour_written = True
+            if hour_written:
+                written += 1
 
-    append_watermark(done, watermark)
-    LOG.info("[%s] wrote %d hours, %d files, %d rows", spec.key, written, len(done), total_rows)
+        for table in spec.tables:
+            stale = stale_hours(spec, available, state[table.key] | set(done[table.key]))
+            if stale:
+                # The failure this catches is silent by nature: a run that writes
+                # one hour and leaves ten behind exits 0 and commits real data.
+                # AEMO retains about two days, so hours left in a closed window
+                # are on a clock, and the only symptom is a log line nobody reads
+                # unless it says so.
+                LOG.warning(
+                    "[%s] %d closed hour(s) left un-ingested, oldest %s. "
+                    "AEMO retains about two days; these will be lost if not picked up.",
+                    table.key, len(stale), f"{stale[0]:%Y-%m-%d %H}:00",
+                )
+
+    for table in spec.tables:
+        append_watermark(done[table.key], watermark_path(table, bronze_dir))
+        LOG.info("[%s] wrote %d files, %d rows", table.key,
+                 len(done[table.key]), rows_by_key[table.key])
     return written
+

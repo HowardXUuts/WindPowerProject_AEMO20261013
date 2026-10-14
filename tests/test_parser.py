@@ -18,7 +18,7 @@ from nemweb import (
 
 def extract_scada(text, source_file):
     """Parse SCADA rows out of a CSV payload, as the ingester does."""
-    return extract_rows(SCADA, text, source_file)
+    return extract_rows(SCADA.tables[0], text, source_file)
 
 
 def test_keeps_only_d_rows(sample_csv):

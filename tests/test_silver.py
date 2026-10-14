@@ -17,9 +17,11 @@ from build_silver import (
     ready_dates,
     silver_path,
 )
-from ingest_price import PRICE
+from ingest_dispatchis import PRICE_TABLE
 from ingest_scada import SCADA
 from nemweb import NEM_TZ, bronze_path, write_bronze
+
+UNIT = SCADA.tables[0]  # the bronze table SCADA writes
 
 INGESTED = datetime(2026, 10, 14, 0, 0, tzinfo=NEM_TZ)
 
@@ -50,7 +52,7 @@ def write_scada(bronze_dir, rows):
             (settlement, duid, mw, source, ingested)
         )
     for hour, hour_rows in by_hour.items():
-        write_bronze(SCADA, hour_rows, bronze_path(SCADA, hour, bronze_dir))
+        write_bronze(UNIT, hour_rows, bronze_path(UNIT, hour, bronze_dir))
 
 
 def write_price(bronze_dir, rows):
@@ -61,7 +63,7 @@ def write_price(bronze_dir, rows):
             (settlement, region, intervention, 1, "i", rrp, 0.0, rrp, 0, 0, source, ingested)
         )
     for hour, hour_rows in by_hour.items():
-        write_bronze(PRICE, hour_rows, bronze_path(PRICE, hour, bronze_dir))
+        write_bronze(PRICE_TABLE, hour_rows, bronze_path(PRICE_TABLE, hour, bronze_dir))
 
 
 def full_day(day: date, duid="WFA1", mw=10.0):

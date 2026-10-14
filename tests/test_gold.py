@@ -28,6 +28,8 @@ from build_gold import build
 from ingest_scada import SCADA
 from nemweb import NEM_TZ, bronze_path, write_bronze
 
+UNIT = SCADA.tables[0]  # the bronze table SCADA writes
+
 DAY = date(2026, 10, 12)
 INTERVALS = 288
 HALF = 144
@@ -122,13 +124,12 @@ def gold(tmp_path):
 
     # One bronze hour NEWER than silver, so the snapshot has something fresher.
     tomorrow = datetime(2026, 10, 13, 0, 5, tzinfo=NEM_TZ)
-    write_bronze(
-        SCADA,
+    write_bronze(UNIT,
         [
             (tomorrow, "WFA1", 99.0, "fresh.zip", tomorrow),
             (tomorrow, "WFB1", 10.0, "fresh.zip", tomorrow),
         ],
-        bronze_path(SCADA, tomorrow - timedelta(minutes=5), bronze),
+        bronze_path(UNIT, tomorrow - timedelta(minutes=5), bronze),
     )
 
     registry = tmp_path / "wind_duids.csv"
@@ -310,9 +311,8 @@ def test_snapshot_falls_back_to_silver_without_fresh_bronze(tmp_path):
     # Bronze that only repeats what silver already has.
     bronze = tmp_path / "bronze"
     stale = datetime(2026, 10, 12, 0, 5, tzinfo=NEM_TZ)
-    write_bronze(
-        SCADA, [(stale, "WFA1", 80.0, "old.zip", stale)],
-        bronze_path(SCADA, stale - timedelta(minutes=5), bronze),
+    write_bronze(UNIT, [(stale, "WFA1", 80.0, "old.zip", stale)],
+        bronze_path(UNIT, stale - timedelta(minutes=5), bronze),
     )
     registry = tmp_path / "wind_duids.csv"
     registry.write_text(REGISTRY)

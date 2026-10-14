@@ -54,11 +54,13 @@ jobs:
         env:
           LIMIT: ${{ inputs.limit }}
 
-      - name: Ingest dispatch price ($/MWh)
-        # Runs even if SCADA failed: the two sources are independent, each has
-        # its own watermark, and AEMO only retains about two days of files.
+      - name: Ingest DispatchIS (price, regional demand, interconnectors)
+        # Runs even if SCADA failed: the sources are independent, each bronze
+        # table has its own watermark, and AEMO only retains about two days of
+        # files. One step rather than three because the three tables come out
+        # of the same zip, which is downloaded once.
         if: always()
-        run: python scripts/ingest_price.py ${LIMIT:+--limit "$LIMIT"}
+        run: python scripts/ingest_dispatchis.py ${LIMIT:+--limit "$LIMIT"}
         env:
           LIMIT: ${{ inputs.limit }}
 
@@ -78,10 +80,15 @@ jobs:
             exit 0
           fi
 
-          scada=$(git diff --cached --name-only -- data/bronze/scada | grep -c '\.parquet$' || true)
-          price=$(git diff --cached --name-only -- data/bronze/price | grep -c '\.parquet$' || true)
-          echo "Committing ${scada} scada and ${price} price files."
-          git commit -m "data: bronze ingest (${scada} scada, ${price} price) [skip ci]"
+          counts=""
+          total=0
+          for source in scada price regionsum interconnector; do
+            n=$(git diff --cached --name-only -- "data/bronze/${source}" | grep -c '\.parquet$' || true)
+            total=$((total + n))
+            if [ "${n}" -gt 0 ]; then counts="${counts}${counts:+, }${n} ${source}"; fi
+          done
+          echo "Committing ${total} bronze files: ${counts}"
+          git commit -m "data: bronze ingest (${counts:-none}) [skip ci]"
 
           # Another run may have landed while this one was downloading. Rebase
           # rather than force: every bronze file is write-once, so the two
