@@ -4,15 +4,19 @@ on:
   workflow_dispatch:
     inputs:
       limit:
-        description: "Max source files per run, rounded down to whole hours (blank = all)"
+        description: "Max source files, rounded down to whole hours (blank = drain the backlog)"
         required: false
-        default: "12"
+        default: ""
   schedule:
-    # Hourly at :07. One run picks up the twelve five-minute files of the hour
-    # AEMO has just finished publishing, and writes them as a single Parquet
-    # file: 24 immutable files a day rather than 288, and no rewrites ever.
-    # Scheduled runs are best-effort and often late; the watermark backfills
-    # whatever was missed, so a skipped run is self-healing.
+    # Hourly at :07, writing each closed hour as a single Parquet file: 24
+    # immutable files a day rather than 288, and no rewrites ever.
+    #
+    # The schedule is the weak link, not the ingest. GitHub drops scheduled
+    # events under load — this workflow fired 3 times in the 24 hours of
+    # 2026-10-13, not 24 — so a run must ingest every closed hour it finds
+    # pending, not just the newest one. Capping a run at one hour made bronze
+    # advance one hour per run while the clock advanced many, and AEMO retains
+    # only about two days, so the shortfall became permanent data loss.
     - cron: "7 * * * *"
 
 permissions:
@@ -27,7 +31,10 @@ concurrency:
 jobs:
   ingest:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Generous because a run after a long gap downloads every missed interval:
+    # a full two-day backlog is about 576 files per source, fetched one at a
+    # time. A normal hourly run finishes in under a minute.
+    timeout-minutes: 45
 
     steps:
       - uses: actions/checkout@v4
@@ -41,7 +48,9 @@ jobs:
         run: pip install --disable-pip-version-check .
 
       - name: Ingest dispatch SCADA (wind MW)
-        run: python scripts/ingest_scada.py --limit "${LIMIT:-12}"
+        # No --limit unless a human asked for one: a scheduled run must drain
+        # the whole backlog, which is what makes a dropped run self-healing.
+        run: python scripts/ingest_scada.py ${LIMIT:+--limit "$LIMIT"}
         env:
           LIMIT: ${{ inputs.limit }}
 
@@ -49,7 +58,7 @@ jobs:
         # Runs even if SCADA failed: the two sources are independent, each has
         # its own watermark, and AEMO only retains about two days of files.
         if: always()
-        run: python scripts/ingest_price.py --limit "${LIMIT:-12}"
+        run: python scripts/ingest_price.py ${LIMIT:+--limit "$LIMIT"}
         env:
           LIMIT: ${{ inputs.limit }}
 

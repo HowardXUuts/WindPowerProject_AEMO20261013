@@ -397,6 +397,25 @@ def select_closed_hours(
     return selected
 
 
+def stale_hours(spec: ReportSpec, available: list[str], ingested: set[str]) -> list[datetime]:
+    """Closed NEM hours AEMO still lists but bronze has not ingested, oldest first.
+
+    The hour AEMO is currently publishing into is not stale: it is simply not
+    closed yet. Anything older than that should have been written.
+    """
+    outstanding = set(available) - ingested
+    if not outstanding:
+        return []
+    open_hour = hour_of(max(interval_from_filename(spec, name) for name in available))
+    return sorted(
+        {
+            hour
+            for hour in (hour_of(interval_from_filename(spec, name)) for name in outstanding)
+            if hour < open_hour
+        }
+    )
+
+
 def run(
     spec: ReportSpec,
     limit: int | None = None,
@@ -461,6 +480,21 @@ def run(
             done.extend(files)
             total_rows += count
             written += 1
+
+        stale = stale_hours(spec, available, ingested | set(done))
+        if stale:
+            # The failure this catches is silent by nature: a run that writes
+            # one hour and leaves ten behind exits 0 and commits real data.
+            # AEMO retains about two days, so hours left in a closed window are
+            # on a clock, and the only symptom is a log line nobody reads
+            # unless it says so.
+            LOG.warning(
+                "[%s] %d closed hour(s) left un-ingested, oldest %s. "
+                "AEMO retains about two days; these will be lost if not picked up.",
+                spec.key,
+                len(stale),
+                f"{stale[0]:%Y-%m-%d %H}:00",
+            )
 
     append_watermark(done, watermark)
     LOG.info("[%s] wrote %d hours, %d files, %d rows", spec.key, written, len(done), total_rows)
