@@ -279,3 +279,305 @@ inspected.
 23. Architecture diagram and a data dictionary in the README.
 24. Repo size report in the run log, and a documented pruning strategy for when
     history growth becomes a problem.
+
+**Phase 9 — Forecasting and battery arbitrage** — *see section 4*
+25. Extend the registry from wind-only to a typed unit list, so batteries are
+    classified rather than discarded, and solar and other fuels can be rolled
+    up to regional totals.
+26. New bronze source: `P5MIN`, AEMO's own five-minute forecast, as the
+    baseline to beat and as a feature.
+27. `scripts/build_features.py` + `sql/ml/`: one row per region per interval,
+    derived and not committed.
+28. `scripts/train_forecast.py`: walk-forward training for four targets, with
+    the purge and embargo described in section 4.
+29. `scripts/backtest_battery.py`: arbitrage simulation driven by the forecast,
+    measured against perfect foresight and a no-forecast threshold rule.
+30. Dashboard panels for forecast error against the baselines, spike
+    reliability, and backtest revenue.
+
+## 4. Forecasting and battery arbitrage
+
+Plan only. Nothing in this section is built.
+
+### 4.1 Scope
+
+The project studies **wind farms and batteries**. Solar, coal, gas, hydro and
+everything else enter only as **regional totals used as features** — never
+modelled, never broken out per unit. That keeps the subject matter narrow
+enough to say something real about, while still letting the model see the
+supply stack that actually sets the price.
+
+Everything the model sees comes from **silver** (section 4.3), which is the
+last layer at five-minute grain.
+
+This forces one change upstream. The registry today answers "is this a wind
+farm?" and discards everything else; Hornsdale Power Reserve is excluded by
+name. It must instead answer "what kind of unit is this?" — `wind`, `battery`,
+or `other` — because a battery is now a subject and the rest is now a feature.
+The existing exclusion logic becomes a classification, and `in_scada` stays as
+it is.
+
+### 4.2 Targets
+
+Price is regional, so the unit of prediction is **(region, interval)**. Wind
+and battery output are features, not targets. **SA1 first**: the most
+wind-exposed region, the most volatile price, and the one where a battery has
+the clearest case. Then the other four, as separate models rather than one
+pooled model, until there is evidence pooling helps.
+
+For a forecast made at interval `t`, over a window of the next `h` minutes
+(`h` in {60, 120}, i.e. the next 12 and 24 dispatch intervals):
+
+| Target | Definition | Type |
+|--------|-----------|------|
+| `y_mean_60` | mean RRP over `t+5 … t+60` | regression |
+| `y_mean_120` | mean RRP over `t+5 … t+120` | regression |
+| `y_spike_60` | any interval in `t+5 … t+60` above $300/MWh | binary |
+| `y_spike_120` | any interval in `t+5 … t+120` above $300/MWh | binary |
+
+Mean and spike are deliberately separate problems. Price is heavy-tailed
+enough that a model tuned on mean absolute error learns to ignore spikes, and
+a spike is exactly what a battery is paid for. One model optimising MAE would
+be excellent at the 95% of intervals that do not matter commercially.
+
+### 4.3 Features
+
+**Features are built from silver, never from gold.**
+
+Gold's finest grain is hourly (`region_hourly`); everything else in it is
+daily. The targets in 4.2 are defined on five-minute dispatch intervals, and
+most of the features below are five-minute lags, ramps and spike counts.
+Those cannot be recovered from an hourly mean — the averaging has already
+removed the spike, which is the single thing a battery is paid for. Silver is
+the last layer that still holds one row per five-minute interval:
+
+| Layer | Finest grain | Usable as a feature source |
+|-------|--------------|---------------------------|
+| `silver/wind_output`, `silver/price` | 5 minutes | **yes** |
+| `gold/region_hourly` | 1 hour | no — spikes already averaged away |
+| `gold/farm_daily`, `farm_revenue_daily`, `capture_price` | 1 day | no |
+
+This is not a flaw in gold. Gold aggregates deliberately, for human reading;
+it is simply the wrong input for a model predicting five-minute prices.
+
+Gold keeps two roles in this phase: as context when interpreting results
+(`capture_price` says what wind actually earned, which is the commercial
+backdrop to a forecast), and as the dashboard's source, which is where the
+model's own outputs are published alongside it.
+
+Every feature is **a function of the (region, interval) grid at or before `t`**.
+
+**Price history** — lags at 5, 10, 15, 30, 60, 120 minutes; rolling mean,
+standard deviation, min and max over 30, 60 and 240 minutes; count of intervals
+above $300 in the last 60 and 240 minutes; time since the last spike.
+
+**Wind** — regional wind MW; wind as a share of registered wind capacity;
+5, 30 and 60-minute ramp; the same for the region's neighbours, since an
+interconnector makes a neighbour's wind a local price signal.
+
+**Battery** — regional battery MW, signed, so charging and discharging are
+distinguishable; battery share of registered battery capacity, a crude proxy
+for available state of charge, which AEMO does not publish directly.
+
+**Other supply, as regional totals only** — solar MW, and non-renewable MW
+as a single figure. The point is the residual: demand minus wind minus solar
+is what the dispatchable stack has to cover, and it predicts price far better
+than any of its parts.
+
+**Demand and system** — regional demand, its ramp, and net interconnector flow.
+
+**Calendar** — interval of day and day of week, each as sine/cosine pairs so
+midnight is adjacent to 23:55; public holiday flag; month.
+
+**AEMO's own forecast** — the `P5MIN` run issued at or before `t`: forecast
+RRP for each interval in the window, and forecast regional demand. This is both
+the strongest feature and the baseline to beat.
+
+**Weather (optional, later)** — forecast wind speed at hub height for the
+region's main wind corridors. Deferred, not because it would not help but
+because it introduces a second source with a genuinely harder leakage problem
+(section 4.4) and the model should first be shown to work without it.
+
+### 4.4 Leakage rules
+
+These are the rules the whole phase stands on. A leaked feature produces a
+model that looks superb and earns nothing.
+
+1. **A feature at `t` may use only data whose interval ends at or before
+   `t`.** The grid is interval-ending, so the interval labelled `t` is already
+   complete and is admissible.
+
+2. **Allow one interval of publication lag.** A dispatch interval ending at
+   `t` is not on NEMWeb at `t`. Features use data up to `t − 5 min` unless a
+   measured publication delay proves otherwise. Costing one interval of
+   information is cheaper than discovering the whole backtest was optimistic.
+
+3. **Forecasts are keyed by issue time, never by valid time.** Every
+   forecast row carries `issued_at` and `valid_for`, and a feature may use a
+   row only where `issued_at <= t`. Joining on `valid_for` alone is the
+   classic way to hand a model tomorrow's answer. This applies to `P5MIN`,
+   pre-dispatch and any weather forecast.
+
+4. **Weather is admissible only from a forecast issued before `t`.** Observed
+   weather at `t` is not available at `t` in practice, and analysis-grade
+   reanalysis is not available at all in real time. Store the issue time or do
+   not store it.
+
+5. **The registry is a slowly changing dimension.** Using today's capacities
+   to build 2024 features tells the model which farms were later expanded.
+   Either snapshot the registry with effective dates, or restrict training to
+   the period since the current registry was valid, and say which.
+
+6. **Fit every transformation inside the fold.** Scalers, imputation values,
+   target encodings and feature selection are fitted on training rows only.
+
+7. **Purge and embargo** (section 4.5), because a target window straddling
+   the fold boundary leaks the test period into training.
+
+8. **No feature derived from the target window**, including "number of
+   intervals since the last spike" computed with hindsight.
+
+A test asserts rule 1 mechanically: for a sample of rows, rebuild each feature
+using only data up to `t` and assert equality with the stored value. A feature
+that fails cannot be explained away.
+
+### 4.5 Walk-forward validation
+
+Random k-fold on a time series is meaningless here, and ordinary
+train/test splitting is not enough either, because the targets overlap.
+
+- **Rolling origin.** Fold `k` trains on everything up to `cutoff_k` and tests
+  on the following 14 days. Origins advance 14 days at a time.
+- **Purge.** Drop training rows whose target window extends past `cutoff_k`.
+  With a 120-minute horizon that is the last 24 training intervals.
+- **Embargo.** Skip the first 120 minutes of the test period, so no test
+  feature overlaps a training target.
+- **Expanding, not sliding, window** to start. The NEM changes structurally —
+  new batteries, new transmission — so a sliding window may prove better; that
+  is an experiment, not an assumption.
+- **Report per fold, never only pooled.** A single pooled number hides a model
+  that worked until a market change and then stopped.
+
+### 4.6 Baselines
+
+The model must beat all three, reported side by side at every horizon:
+
+1. **Persistence** — the forecast mean is the current RRP; spike probability is
+   1 if the current interval is above $300. Trivially cheap and surprisingly
+   hard to beat over 60 minutes.
+2. **Same time yesterday** — the mean over the same clock window 24 hours
+   earlier. Captures the daily shape that persistence misses.
+3. **AEMO `P5MIN`** — the market operator's own forecast for the same window.
+   This is the honest bar. If the model cannot beat it, the correct conclusion
+   is that AEMO's forecast is good, and the write-up says so.
+
+For spike probability, a fourth: **climatology**, the historical spike rate for
+that interval-of-day, which is what any calibrated model must beat to be worth
+its complexity.
+
+**Metrics.** Regression: MAE and RMSE, reported both overall and split by
+whether the window contained a spike, because an overall MAE is dominated by
+the rare intervals. Classification: Brier score, precision-recall AUC (not
+ROC AUC — spikes are rare enough that ROC flatters everything), and a
+reliability curve, since a probability that is not calibrated is useless to
+the dispatch rule in 4.7. The decisive metric is section 4.7's revenue.
+
+### 4.7 Battery arbitrage backtest
+
+A forecast is only worth what a decision made from it earns.
+
+**The battery.** A price-taking unit, parameterised: power MW, energy MWh,
+round-trip efficiency (0.85 to start), state-of-charge limits. Default to a
+realistic SA1 unit. Price-taking is an assumption worth stating: a large
+battery moves the price it trades into, and this backtest will not model that,
+so results overstate what a large unit would earn.
+
+**The policy.** Charge when the forecast mean over the next window is in the
+bottom quantile of recent prices and state of charge allows; discharge when
+the forecast mean is in the top quantile or forecast spike probability exceeds
+a threshold. Thresholds tuned **inside the training fold only** — tuning them
+on the test period is leakage wearing a different hat.
+
+**Settlement.** Every trade settles at the *actual* RRP of the interval it
+occurs in, never the forecast. Charging pays, discharging earns, and
+round-trip losses are taken on the charge leg.
+
+**Comparators.**
+
+| Strategy | What it establishes |
+|----------|--------------------|
+| Perfect foresight | the ceiling: all the money a perfect forecast could earn |
+| Forecast-driven policy | what this model is worth |
+| Fixed price threshold, no forecast | how much of that is the forecast rather than the rule |
+| Do nothing | zero |
+
+Reported as $/MW/day and as a share of the perfect-foresight ceiling, per fold.
+The second number is the one that matters: "captured 34% of the theoretical
+maximum" says more than a dollar figure that depends on how volatile the test
+period happened to be.
+
+### 4.8 Repo size
+
+Measured on a worst case of 1,440 region-intervals a day and 50 float columns,
+using random values, which do not compress — real lag and rolling features
+correlate heavily and would do better:
+
+| Artefact | Per day | Per year | Committed? |
+|----------|---------|----------|-----------|
+| Features (50 cols) | 551 KB | **201 MB** | **No — derived** |
+| Predictions (4 targets) | 46 KB | **17 MB** | Yes |
+| Model files | — | ~60 MB if monthly | **No** |
+| `P5MIN` bronze | — | ~15 MB | Yes |
+
+Committing features would cost more than the entire existing pipeline and push
+the repository past GitHub's 1 GB recommendation inside two years. They are
+reproducible from silver by definition, so they are rebuilt in the workflow
+and gitignored — the same decision already taken for `docs/data`.
+
+Model files are build artefacts, not data: kept as workflow artefacts, with
+only metrics and predictions committed. A model worth keeping gets attached to
+a release.
+
+**ML therefore adds about 32 MB a year**, taking the project to roughly
+330 MB a year. The budget decision stands.
+
+Model outputs get their own tree, because they do not all behave the same way:
+
+```
+data/ml/
+  predictions/date=YYYY-MM-DD.parquet   write-once, like silver
+  metrics.parquet                        full rewrite, like gold
+  backtest.parquet                       full rewrite, like gold
+```
+
+Predictions are **write-once**. A forecast issued at 14:05 yesterday is a
+historical fact, and rewriting it would destroy the only honest record of what
+the model actually said at the time — the difference between a backtest and a
+retrofit. Metrics and backtest results are recomputed across all history on
+every run, so they are rewritten in full, exactly as gold is.
+
+Features sit outside this tree entirely: derived, gitignored, rebuilt in the
+workflow.
+
+The flow, end to end:
+
+```
+silver ──► features (derived, gitignored) ──► model ──► data/ml/predictions
+                                                   └──► data/ml/metrics
+  gold ──────────────────────────────────────────────► dashboard ◄──────┘
+```
+
+### 4.9 Dependencies
+
+A new `ml` extra, installed by the ML workflow and by nothing else:
+
+```toml
+ml = ["scikit-learn>=1.5", "lightgbm>=4.5", "pandas>=2.2", "numpy>=2.0"]
+```
+
+Gradient boosting because the problem is tabular, non-linear, and small enough
+to train on a free runner in minutes; a regularised linear model is the first
+thing to try and the thing to fall back to if boosting does not clearly beat it.
+These are large wheels — scikit-learn alone is tens of megabytes — which is
+precisely why the hourly ingest must keep installing plain `.` and never see
+them.
