@@ -261,13 +261,38 @@ inspected.
     commits carry `[skip ci]` and would otherwise suppress it. ✓
 
 **Phase 6 — Dashboard** — *done*
-18. `scripts/export_dashboard.py` + `sql/dashboard/`: seven JSON slices from
-    gold into `docs/data/`, about 18 KB in total. ✓
+18. `scripts/export_dashboard.py` + `sql/dashboard/`: eight JSON slices from
+    gold into `docs/data/`, about 50 KB in total. ✓
 19. `docs/index.html`: plain HTML and Chart.js from a CDN, no build step.
     Fleet tiles, regional output, capacity factor trend, best and worst farms,
-    revenue and negative-price exposure, capture detail, quality table. ✓
+    revenue and negative-price exposure, capture ratio, capture detail,
+    quality table. ✓
 20. `pages.yml` deploys `docs/` whenever gold changes, regenerating the JSON
     rather than committing it. ✓
+21. `docs/farm.html`: one farm at a time, picked from a dropdown. Its
+    scorecard, the hour-of-day output shape against the regional price shape,
+    the five-minute profile of the most recent complete day, its daily record,
+    and its rank in the fleet. ✓
+
+    **Why the per-farm detail reads silver, not gold.** The subject of the page
+    is the five-minute shape, which gold has already averaged to hourly, and
+    the whole point is *when* a farm generates against when its region pays.
+    Putting it in gold is not an option either: gold is committed and rewritten
+    every run, so 96 farms × 288 intervals would add megabytes to git history
+    hourly. `docs/data/` is gitignored and rebuilt at deploy time, so the files
+    cost deploy seconds and nothing in the repository.
+
+    **Why one file per farm.** All farms in one slice is 2.4 MB today and
+    36 MB after a year — it works now and breaks silently as data accumulates.
+    One file per farm is ~21 KB, and a visitor downloads only the farm they
+    picked. The hour-of-day shape is windowed to 14 days to keep it that size
+    as history grows.
+
+    Developer-facing measures throughout: capture price, capture ratio against
+    the regional time-weighted average, revenue per MW installed per day, and
+    negative-price share. Capacity factor alone ranks a merchant project wrong
+    — the live data already shows farms with the fleet's best capacity factors
+    earning negative revenue.
 
 **Phase 7 — Assistant**
 20. `assistant/schema.md` and the system prompt describing the gold tables.

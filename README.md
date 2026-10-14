@@ -58,7 +58,8 @@ registry is built from AEMO's registration list and refreshed on demand. Silver
 joins the two into a wind-only, quality-flagged table, one immutable file per
 trading date, and gold turns that into revenue, capture price and a live fleet
 snapshot. A static dashboard on GitHub Pages reads JSON slices exported from
-gold. The Q&A assistant is next.
+gold: a fleet overview, and a per-farm page that pairs each farm's output shape
+with its region's price shape. The Q&A assistant is next.
 
 See [`PLAN.md`](PLAN.md) for the repository layout, design decisions, and build
 steps.
@@ -78,8 +79,8 @@ Locally:
 ```bash
 python3.11 -m venv .venv && source .venv/bin/activate
 pip install '.[dev,reference]'
-pytest -q                                    # 178 tests, no network needed
-python scripts/export_dashboard.py           # gold -> docs/data/*.json
+pytest -q                                    # 191 tests, no network needed
+python scripts/export_dashboard.py           # gold + silver -> docs/data/
 python -m http.server 8000 --directory docs  # then open localhost:8000
 ```
 

@@ -1,0 +1,180 @@
+/* Shared styles for the dashboard pages.
+   Extracted from index.html so the farm page cannot drift from it: two
+   pages that look like one system have to share the tokens, not copy them. */
+:root {
+    color-scheme: light;
+    --surface-1: #fcfcfb;
+    --page: #f9f9f7;
+    --text-primary: #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted: #898781;
+    --grid: #e1e0d9;
+    --axis: #c3c2b7;
+    --border: rgba(11, 11, 11, 0.10);
+    /* Categorical slots 1-5, in the validated order. One region keeps one
+       colour everywhere on the page: colour follows the entity, not its rank. */
+    --series-1: #2a78d6;
+    --series-2: #eb6834;
+    --series-3: #1baf7a;
+    --series-4: #eda100;
+    --series-5: #e87ba4;
+    --good: #0ca30c;
+    --warning: #fab219;
+    --critical: #d03b3b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --surface-1: #1a1a19;
+      --page: #0d0d0d;
+      --text-primary: #f0efec;
+      --text-secondary: #c3c2b7;
+      --text-muted: #898781;
+      --grid: #2c2c2a;
+      --axis: #383835;
+      --border: rgba(255, 255, 255, 0.10);
+      --series-1: #3987e5;
+      --series-2: #d95926;
+      --series-3: #199e70;
+      --series-4: #c98500;
+      --series-5: #d55181;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --surface-1: #1a1a19;
+    --page: #0d0d0d;
+    --text-primary: #f0efec;
+    --text-secondary: #c3c2b7;
+    --text-muted: #898781;
+    --grid: #2c2c2a;
+    --axis: #383835;
+    --border: rgba(255, 255, 255, 0.10);
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+    --series-4: #c98500;
+    --series-5: #d55181;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--page);
+    color: var(--text-primary);
+    font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    -webkit-text-size-adjust: 100%;
+  }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 24px 16px 64px; }
+
+  header h1 { font-size: 1.5rem; margin: 0 0 4px; letter-spacing: -0.01em; }
+  header p { margin: 0; color: var(--text-secondary); font-size: 0.9rem; }
+  header a { color: inherit; }
+
+  .tiles {
+    display: grid; gap: 12px; margin: 20px 0 8px;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  }
+  .tile {
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 10px; padding: 14px 16px;
+  }
+  .tile .label { font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; }
+  .tile .value { font-size: 1.6rem; font-variant-numeric: tabular-nums; margin-top: 2px; letter-spacing: -0.02em; }
+  .tile .sub { font-size: 0.8rem; color: var(--text-secondary); }
+
+  .panel {
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 10px; padding: 16px; margin-top: 16px;
+  }
+  .panel h2 { font-size: 1rem; margin: 0 0 2px; }
+  .panel .note { margin: 0 0 12px; font-size: 0.82rem; color: var(--text-secondary); }
+  .panel-head { display: flex; align-items: flex-start; gap: 12px; justify-content: space-between; }
+
+  .chart { position: relative; height: 280px; }
+  .chart.tall { height: 420px; }
+  @media (max-width: 560px) { .chart { height: 240px; } .chart.tall { height: 460px; } }
+
+  .toggle {
+    flex: 0 0 auto; font: inherit; font-size: 0.78rem; cursor: pointer;
+    background: transparent; color: var(--text-secondary);
+    border: 1px solid var(--border); border-radius: 999px; padding: 4px 10px;
+  }
+  .toggle:hover { color: var(--text-primary); }
+  .toggle[aria-pressed="true"] { color: var(--text-primary); border-color: var(--axis); }
+
+  /* Tables scroll inside the panel rather than stretching the page: the
+     five-minute profile is 288 rows, and the no-CDN fallback opens every table
+     at once. Without a ceiling that is a 29,000px page. */
+  .tablewrap { overflow: auto; margin-top: 12px; max-height: 60vh; }
+  table { border-collapse: collapse; width: 100%; font-size: 0.8rem; }
+  th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+  th { color: var(--text-muted); font-weight: 600; text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.04em; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  [hidden] { display: none !important; }
+
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: baseline; }
+  .status { font-weight: 600; }
+  .status-pass { color: var(--good); }
+  .status-warn { color: var(--text-primary); }
+  .status-fail { color: var(--critical); }
+  .status-skip { color: var(--text-muted); }
+
+  .two { display: grid; gap: 16px; grid-template-columns: 1fr; }
+  @media (min-width: 760px) { .two { grid-template-columns: 1fr 1fr; } }
+
+  footer { margin-top: 32px; font-size: 0.8rem; color: var(--text-muted); }
+  footer a { color: var(--text-secondary); }
+  .err { color: var(--critical); font-size: 0.85rem; }
+
+  /* --- navigation between the two pages -------------------------------- */
+  nav.pages { display: flex; gap: 4px; margin: 18px 0 0; flex-wrap: wrap; }
+  nav.pages a {
+    font-size: 0.85rem; text-decoration: none; padding: 6px 12px; border-radius: 999px;
+    color: var(--text-secondary); border: 1px solid var(--border);
+  }
+  nav.pages a:hover { color: var(--text-primary); }
+  nav.pages a[aria-current="page"] {
+    color: var(--text-primary); border-color: var(--axis); background: var(--surface-1);
+  }
+
+  /* --- filter row: one row above the charts, never beside them ---------- */
+  .filters {
+    display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end;
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 10px; padding: 14px 16px; margin-top: 16px;
+  }
+  .field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+  .field label {
+    font-size: 0.72rem; color: var(--text-muted);
+    text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  .field select {
+    font: inherit; font-size: 0.9rem; padding: 7px 10px;
+    color: var(--text-primary); background: var(--page);
+    border: 1px solid var(--axis); border-radius: 8px;
+    /* A select is sized by its widest option unless told otherwise, and the
+       longest farm name is wider than a phone. min-width: 0 lets it shrink
+       inside the flex row; width: 100% then fills whatever is left. */
+    width: 100%; min-width: 0; max-width: 100%;
+  }
+  .field.grow { flex: 1 1 260px; }
+  @media (max-width: 560px) {
+    .filters { flex-direction: column; align-items: stretch; }
+    /* flex-basis is the main axis, which is now height: .grow would reserve
+       260px of empty vertical space between the selects. */
+    .field.grow { flex: 0 0 auto; }
+  }
+
+  /* Paired small multiples: two measures of different scale share an x axis
+     rather than sharing one chart with two y axes. */
+  .pair { display: grid; gap: 0; }
+  .pair .chart { height: 200px; }
+  .pair .sub-label {
+    font-size: 0.78rem; color: var(--text-secondary); margin: 8px 0 0;
+  }
+  .pair .chart + .sub-label { margin-top: 4px; }
+
+  .hint { font-size: 0.82rem; color: var(--text-secondary); margin: 10px 0 0; }
+  .bad { color: var(--critical); }
+  .good-text { color: var(--good); }
