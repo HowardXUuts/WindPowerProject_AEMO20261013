@@ -146,6 +146,11 @@ Rules that follow from this:
 Planned, not built — see PLAN.md section 4. These rules apply the moment any
 of it exists.
 
+- **Features come from silver, never from gold.** Gold's finest grain is
+  hourly and the rest is daily; the targets and most features are five-minute.
+  An hourly mean has already averaged the spike away, and the spike is the only
+  interval a battery is paid for. Gold stays the dashboard's source and the
+  commercial context, not the model's input.
 - The unit of prediction is (region, interval). Price is regional; wind and
   battery output are features, never targets.
 - Mean price and spike probability are separate models. Price is heavy-tailed
@@ -155,6 +160,10 @@ of it exists.
   about 200 MB a year against 17 MB for the predictions, and it is reproducible
   from silver by definition. Rebuild it in the workflow and gitignore it, as
   `docs/data` already is. Model files are build artefacts, not data.
+- Model outputs live in `data/ml/`. Predictions are **write-once per day**,
+  like silver: a forecast issued at 14:05 is a historical fact, and rewriting it
+  destroys the only evidence the model was not retrofitted. Metrics and backtest
+  results are rewritten in full, like gold.
 - The `ml` extra (`scikit-learn`, `lightgbm`, `pandas`, `numpy`) is installed
   by the ML workflow and nothing else. The hourly ingest keeps installing plain
   `.`; these wheels are tens of megabytes.

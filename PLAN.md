@@ -307,6 +307,9 @@ modelled, never broken out per unit. That keeps the subject matter narrow
 enough to say something real about, while still letting the model see the
 supply stack that actually sets the price.
 
+Everything the model sees comes from **silver** (section 4.3), which is the
+last layer at five-minute grain.
+
 This forces one change upstream. The registry today answers "is this a wind
 farm?" and discards everything else; Hornsdale Power Reserve is excluded by
 name. It must instead answer "what kind of unit is this?" — `wind`, `battery`,
@@ -338,6 +341,29 @@ a spike is exactly what a battery is paid for. One model optimising MAE would
 be excellent at the 95% of intervals that do not matter commercially.
 
 ### 4.3 Features
+
+**Features are built from silver, never from gold.**
+
+Gold's finest grain is hourly (`region_hourly`); everything else in it is
+daily. The targets in 4.2 are defined on five-minute dispatch intervals, and
+most of the features below are five-minute lags, ramps and spike counts.
+Those cannot be recovered from an hourly mean — the averaging has already
+removed the spike, which is the single thing a battery is paid for. Silver is
+the last layer that still holds one row per five-minute interval:
+
+| Layer | Finest grain | Usable as a feature source |
+|-------|--------------|---------------------------|
+| `silver/wind_output`, `silver/price` | 5 minutes | **yes** |
+| `gold/region_hourly` | 1 hour | no — spikes already averaged away |
+| `gold/farm_daily`, `farm_revenue_daily`, `capture_price` | 1 day | no |
+
+This is not a flaw in gold. Gold aggregates deliberately, for human reading;
+it is simply the wrong input for a model predicting five-minute prices.
+
+Gold keeps two roles in this phase: as context when interpreting results
+(`capture_price` says what wind actually earned, which is the commercial
+backdrop to a forecast), and as the dashboard's source, which is where the
+model's own outputs are published alongside it.
 
 Every feature is **a function of the (region, interval) grid at or before `t`**.
 
@@ -514,6 +540,32 @@ a release.
 
 **ML therefore adds about 32 MB a year**, taking the project to roughly
 330 MB a year. The budget decision stands.
+
+Model outputs get their own tree, because they do not all behave the same way:
+
+```
+data/ml/
+  predictions/date=YYYY-MM-DD.parquet   write-once, like silver
+  metrics.parquet                        full rewrite, like gold
+  backtest.parquet                       full rewrite, like gold
+```
+
+Predictions are **write-once**. A forecast issued at 14:05 yesterday is a
+historical fact, and rewriting it would destroy the only honest record of what
+the model actually said at the time — the difference between a backtest and a
+retrofit. Metrics and backtest results are recomputed across all history on
+every run, so they are rewritten in full, exactly as gold is.
+
+Features sit outside this tree entirely: derived, gitignored, rebuilt in the
+workflow.
+
+The flow, end to end:
+
+```
+silver ──► features (derived, gitignored) ──► model ──► data/ml/predictions
+                                                   └──► data/ml/metrics
+  gold ──────────────────────────────────────────────► dashboard ◄──────┘
+```
 
 ### 4.9 Dependencies
 
