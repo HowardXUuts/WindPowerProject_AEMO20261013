@@ -18,6 +18,7 @@ from nemweb import (
     load_watermark,
     pending_files,
     select_closed_hours,
+    stale_hours,
     watermark_path,
     write_bronze,
 )
@@ -161,6 +162,45 @@ def test_already_ingested_files_are_not_reselected():
 def test_nothing_pending_selects_nothing():
     available = [name_at("0000"), name_at("0100")]
     assert select_closed_hours(SCADA, [], available) == []
+
+
+# --- falling behind -------------------------------------------------------
+#
+# A capped run writes real data and exits 0 while leaving closed hours on
+# AEMO's two-day clock. Nothing else in the pipeline notices, so these guard
+# the only signal there is.
+
+
+def test_nothing_is_stale_when_every_closed_hour_is_ingested():
+    available = [name_at(f"{h:02d}{m:02d}") for h in (0, 1, 2) for m in (0, 5)]
+    # Hours 00 and 01 ingested; 02 is the hour AEMO is publishing into.
+    ingested = {name_at(f"{h:02d}{m:02d}") for h in (0, 1) for m in (0, 5)}
+
+    assert stale_hours(SCADA, available, ingested) == []
+
+
+def test_the_open_hour_is_never_stale():
+    available = [name_at("0000"), name_at("0005")]
+    assert stale_hours(SCADA, available, set()) == []
+
+
+def test_closed_hours_left_behind_are_reported_oldest_first():
+    available = [name_at(f"{h:02d}{m:02d}") for h in (0, 1, 2, 3) for m in (0, 5)]
+    ingested = {name_at("0200"), name_at("0205")}
+
+    # Hours 00 and 01 were skipped; 03 is open, so only the two are stale.
+    assert stale_hours(SCADA, available, ingested) == [
+        HOUR,
+        datetime(2026, 10, 13, 1, tzinfo=NEM_TZ),
+    ]
+
+
+def test_a_partially_ingested_hour_is_stale():
+    available = [name_at(f"{h:02d}{m:02d}") for h in (0, 1) for m in (0, 5)]
+    ingested = {name_at("0000")}
+
+    # The 00:05 file is still outstanding, so the hour is not done.
+    assert stale_hours(SCADA, available, ingested) == [HOUR]
 
 
 # --- watermark ------------------------------------------------------------
