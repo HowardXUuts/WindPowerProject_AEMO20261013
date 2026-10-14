@@ -20,6 +20,9 @@ the repository as built; section 3 marks what is done and what remains.
 │   ├── ingest_scada.py             # ReportSpec: Dispatch_SCADA → bronze/scada
 │   ├── ingest_dispatchis.py        # ReportSpec: DispatchIS   → bronze/price,
 │   │                               #   regionsum, interconnector (one download)
+│   ├── ingest_p5min.py             # ReportSpec: P5MIN        → bronze/p5min
+│   ├── ingest_predispatch.py       # ReportSpec: PredispatchIS → bronze/predispatch_price,
+│   │                               #   predispatch_region (one download)
 │   ├── inspect_report.py           # print a report's real headers; writes nothing
 │   ├── refresh_reference.py        # wind DUID registry from the AEMO list
 │   ├── build_silver.py             # wind filter, typing, dedup, validation
@@ -308,6 +311,13 @@ inspected.
     history growth becomes a problem.
 
 **Phase 9 — Forecasting and battery arbitrage** — *see section 4*
+
+B2 (bronze feature sources) — *done*. `ingest_dispatchis.py` writes `price`,
+`regionsum` and `interconnector` from one download; `ingest_p5min.py` writes
+`p5min`; `ingest_predispatch.py` writes `predispatch_price` and
+`predispatch_region` from one download. Every column name was read off a live
+file by `scripts/inspect_report.py`, which the "Inspect AEMO report" workflow
+runs on demand and which writes nothing.
 25. Extend the registry from wind-only to a typed unit list, so batteries are
     classified rather than discarded, and solar and other fuels can be rolled
     up to regional totals.
@@ -403,8 +413,13 @@ above $300 in the last 60 and 240 minutes; time since the last spike.
 interconnector makes a neighbour's wind a local price signal.
 
 **Battery** — regional battery MW, signed, so charging and discharging are
-distinguishable; battery share of registered battery capacity, a crude proxy
-for available state of charge, which AEMO does not publish directly.
+distinguishable. ~~A crude proxy for available state of charge, which AEMO
+does not publish directly.~~ **Corrected 2026-10-15:** AEMO does publish it.
+`DISPATCH_REGIONSUM` carries `BDU_ENERGY_STORAGE` (regional battery energy in
+MWh), `BDU_INITIAL_ENERGY_STORAGE`, `BDU_MIN_AVAIL`/`BDU_MAX_AVAIL` and
+`BDU_CLEAREDMW_GEN`/`BDU_CLEAREDMW_LOAD`. The proxy is unnecessary: state of
+charge is a measured regional quantity, and charge/discharge arrive already
+split by direction. Found by inspecting a live file, not assumed.
 
 **Other supply, as regional totals only** — solar MW, and non-renewable MW
 as a single figure. The point is the residual: demand minus wind minus solar
@@ -576,11 +591,16 @@ mostly Parquet footer — the fixed cost is about 1.5 KB empty and 2.3 KB of a
 
 | Source | Rows/day | Hour grain | Day grain |
 |--------|----------|-----------|----------|
-| `regionsum` | 1,440 | 25.6 MB/yr | **1.9 MB/yr** |
-| `interconnector` | 1,728 | 19.0 MB/yr | **1.5 MB/yr** |
-| `p5min` | 17,280 | 29.9 MB/yr | **4.1 MB/yr** |
-| `predispatch` | 960 | 18.7 MB/yr | **1.1 MB/yr** |
-| **Total** | | **93.2 MB/yr** | **8.6 MB/yr** |
+| `regionsum` | 1,440 | 32.2 MB/yr | **2.1 MB/yr** |
+| `interconnector` | 2,016 | 17.6 MB/yr | **1.5 MB/yr** |
+| `p5min` | 17,280 | 38.7 MB/yr | **5.3 MB/yr** |
+| `predispatch_price` | 960 | 19.9 MB/yr | **1.1 MB/yr** |
+| `predispatch_region` | 960 | 27.5 MB/yr | **1.5 MB/yr** |
+| **Total** | | **136.0 MB/yr** | **11.5 MB/yr** |
+
+Five tables, not four: PredispatchIS keeps its regional prices and its regional
+solution in separate tables (`PREDISPATCH_REGION_PRICES` and
+`PREDISPATCH_REGION_SOLUTION`), so each becomes its own bronze table.
 
 This is the same arithmetic the layer contract already does for bronze, giving
 the opposite answer: hour files won for SCADA because 6,118 rows amortise the
@@ -588,6 +608,17 @@ footer, and lose here because 40 to 720 rows do not. Day files keep the
 write-once property as long as a day is written only once closed, which is the
 rule silver already follows. The contract currently says hour, so these sources
 are built at hour grain until that decision is taken.
+
+At hour grain these five tables cost more per year than the entire existing
+pipeline, and would take the project from roughly 235 MB a year to 370 MB. At
+day grain they cost 11.5 MB and the ML phase lands inside the 32 MB a year it
+was budgeted. Nothing about the data changes between the two — only the number
+of Parquet footers written.
+
+They are ingested at hour grain in the meantime rather than held back, because
+the two costs are not symmetric: AEMO retains about two days, so an hour not
+ingested is gone permanently, while an hour written at the dear grain is 370 KB
+a day of history that a later decision can stop adding to.
 
 Model outputs get their own tree, because they do not all behave the same way:
 

@@ -77,11 +77,20 @@ PRICE_TABLE: Final = TableSpec(
 #                        the regional variable-renewable totals the plan calls
 #                        for, published by AEMO rather than summed by us, and
 #                        they are the other half of the residual.
+#   bdu_energy_storage   regional battery energy storage, in MWh. PLAN 4.3 says
+#                        state of charge is "a crude proxy ... which AEMO does
+#                        not publish directly". It does now: the BDU_ columns
+#                        were in the live file inspected on 2026-10-15, so the
+#                        proxy is unnecessary and the real quantity is cheap.
+#   bdu_cleared_gen      what the batteries were dispatched to do, split by
+#   bdu_cleared_load     direction, so charging and discharging stay
+#                        distinguishable as PLAN 4.3 requires.
 #
-# The two UIGF columns are optional: they were added to this table well after
-# the report existed, and a file that predates them must not fail the run. An
-# absent optional column is logged every time, so "it is always NULL" cannot
-# pass unnoticed.
+# Marked optional, verified present. The BDU_ and SS_ columns were added to
+# this table long after the report existed; the inspection confirms AEMO sends
+# them today, and optional means a file that predates them is skipped rather
+# than failing the hour. An absent optional column is logged every time, so
+# "it is always NULL" cannot pass unnoticed.
 # ---------------------------------------------------------------------------
 
 REGIONSUM_TABLE: Final = TableSpec(
@@ -96,6 +105,9 @@ REGIONSUM_TABLE: Final = TableSpec(
         Column("netinterchange", "DOUBLE", "NETINTERCHANGE", as_float),
         Column("ss_wind_uigf", "DOUBLE", "SS_WIND_UIGF", as_float, optional=True),
         Column("ss_solar_uigf", "DOUBLE", "SS_SOLAR_UIGF", as_float, optional=True),
+        Column("bdu_energy_storage", "DOUBLE", "BDU_ENERGY_STORAGE", as_float, optional=True),
+        Column("bdu_clearedmw_gen", "DOUBLE", "BDU_CLEAREDMW_GEN", as_float, optional=True),
+        Column("bdu_clearedmw_load", "DOUBLE", "BDU_CLEAREDMW_LOAD", as_float, optional=True),
     ),
 )
 
