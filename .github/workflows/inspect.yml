@@ -1,0 +1,71 @@
+name: Inspect AEMO report
+
+# Manual only. This downloads one file from a NEMWeb directory and prints the
+# tables, column headers and a sample row it actually contains. It writes
+# nothing and commits nothing.
+#
+# It exists because column names cannot be guessed from a desk. A wrong guess
+# either fails the ingest or, worse, writes a column of nulls that nobody
+# notices until a model trained on it underperforms for reasons no one can
+# explain. Run this, read the real headers, then write the ReportSpec.
+
+on:
+  workflow_dispatch:
+    inputs:
+      report:
+        description: "Which report to inspect"
+        required: true
+        default: "all"
+        type: choice
+        options:
+          - all
+          - scada
+          - dispatchis
+          - p5min
+          - predispatchis
+      table:
+        description: "Only show tables whose name contains this (blank = all)"
+        required: false
+        default: ""
+      rows:
+        description: "Sample rows per table"
+        required: false
+        default: "1"
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install --disable-pip-version-check .
+
+      - name: Inspect
+        run: |
+          python scripts/inspect_report.py "${REPORT}" \
+            --rows "${ROWS:-1}" ${TABLE:+--table "$TABLE"} \
+            | tee inspect-output.txt
+        env:
+          REPORT: ${{ inputs.report }}
+          TABLE: ${{ inputs.table }}
+          ROWS: ${{ inputs.rows }}
+
+      # Also uploaded, because the step log is awkward to copy out of and this
+      # output exists to be pasted back into a spec.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: aemo-report-headers
+          path: inspect-output.txt
+          retention-days: 7

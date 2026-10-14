@@ -23,6 +23,10 @@ from nemweb import (
     write_bronze,
 )
 
+# One report, one table: the report-level helpers take SCADA, the ones that
+# write a bronze table take the table inside it.
+UNIT = SCADA.tables[0]
+
 SOURCE_FILE = "PUBLIC_DISPATCHSCADA_202610130005_0000000123456789.zip"
 HOUR = datetime(2026, 10, 13, 0, tzinfo=NEM_TZ)
 
@@ -42,13 +46,13 @@ def zip_payload(csv_text: str, member: str = "PUBLIC_DISPATCHSCADA_202610130005.
 
 
 def test_bronze_path_is_one_file_per_hour(tmp_path):
-    path = bronze_path(SCADA, HOUR, tmp_path)
+    path = bronze_path(UNIT, HOUR, tmp_path)
     assert path.relative_to(tmp_path).parts == ("scada", "date=2026-10-13", "hour=00.parquet")
 
 
 def test_every_interval_in_an_hour_maps_to_one_path(tmp_path):
     paths = {
-        bronze_path(SCADA, hour_of(datetime(2026, 10, 13, 7, m, tzinfo=NEM_TZ)), tmp_path)
+        bronze_path(UNIT, hour_of(datetime(2026, 10, 13, 7, m, tzinfo=NEM_TZ)), tmp_path)
         for m in (0, 5, 30, 55)
     }
     assert len(paths) == 1
@@ -58,10 +62,10 @@ def test_every_interval_in_an_hour_maps_to_one_path(tmp_path):
 
 
 def test_write_bronze_roundtrips_through_parquet(sample_csv, tmp_path):
-    rows = extract_rows(SCADA, sample_csv, SOURCE_FILE)
+    rows = extract_rows(UNIT, sample_csv, SOURCE_FILE)
     destination = tmp_path / "hour=00.parquet"
 
-    assert write_bronze(SCADA, rows, destination) == 6
+    assert write_bronze(UNIT, rows, destination) == 6
 
     con = duckdb.connect()
     try:
@@ -76,7 +80,7 @@ def test_write_bronze_roundtrips_through_parquet(sample_csv, tmp_path):
 
 
 def test_write_bronze_preserves_timezone(sample_csv, tmp_path):
-    write_bronze(SCADA, extract_rows(SCADA, sample_csv, SOURCE_FILE), tmp_path / "h.parquet")
+    write_bronze(UNIT, extract_rows(UNIT, sample_csv, SOURCE_FILE), tmp_path / "h.parquet")
 
     con = duckdb.connect()
     try:
@@ -92,7 +96,7 @@ def test_write_bronze_preserves_timezone(sample_csv, tmp_path):
 
 def test_ingest_hour_concatenates_every_file_in_the_hour(sample_csv, tmp_path):
     payloads = [(name_at(f"00{m:02d}"), zip_payload(sample_csv)) for m in (0, 5, 10)]
-    destination, count = ingest_hour(SCADA, HOUR, payloads, tmp_path)
+    destination, count = ingest_hour(UNIT, HOUR, payloads, tmp_path)
 
     assert count == 18  # three files x six rows
     assert destination.name == "hour=00.parquet"
@@ -207,7 +211,7 @@ def test_a_partially_ingested_hour_is_stale():
 
 
 def test_watermark_roundtrip(tmp_path):
-    path = watermark_path(SCADA, tmp_path)
+    path = watermark_path(UNIT, tmp_path)
     assert load_watermark(path) == set()
 
     append_watermark([SOURCE_FILE], path)
@@ -217,14 +221,14 @@ def test_watermark_roundtrip(tmp_path):
 
 
 def test_watermark_ignores_blank_lines(tmp_path):
-    path = watermark_path(SCADA, tmp_path)
+    path = watermark_path(UNIT, tmp_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(f"\n{SOURCE_FILE}\n\n")
     assert load_watermark(path) == {SOURCE_FILE}
 
 
 def test_append_watermark_of_nothing_creates_no_file(tmp_path):
-    path = watermark_path(SCADA, tmp_path)
+    path = watermark_path(UNIT, tmp_path)
     append_watermark([], path)
     assert not path.exists()
 
@@ -233,17 +237,17 @@ def test_watermark_covers_every_file_in_a_written_hour(sample_csv, tmp_path):
     # The hour file is the unit of work, but the watermark stays per source
     # file so a changed hour boundary cannot silently re-ingest.
     files = [name_at(f"00{m:02d}") for m in (0, 5, 10)]
-    ingest_hour(SCADA, HOUR, [(n, zip_payload(sample_csv)) for n in files], tmp_path)
-    append_watermark(files, watermark_path(SCADA, tmp_path))
+    ingest_hour(UNIT, HOUR, [(n, zip_payload(sample_csv)) for n in files], tmp_path)
+    append_watermark(files, watermark_path(UNIT, tmp_path))
 
-    assert load_watermark(watermark_path(SCADA, tmp_path)) == set(files)
-    assert pending_files(SCADA, files, load_watermark(watermark_path(SCADA, tmp_path))) == []
+    assert load_watermark(watermark_path(UNIT, tmp_path)) == set(files)
+    assert pending_files(SCADA, files, load_watermark(watermark_path(UNIT, tmp_path))) == []
 
 
 def test_rerun_produces_the_same_path(sample_csv, tmp_path):
     payloads = [(SOURCE_FILE, zip_payload(sample_csv))]
-    first, _ = ingest_hour(SCADA, HOUR, payloads, tmp_path)
-    second, _ = ingest_hour(SCADA, HOUR, payloads, tmp_path)
+    first, _ = ingest_hour(UNIT, HOUR, payloads, tmp_path)
+    second, _ = ingest_hour(UNIT, HOUR, payloads, tmp_path)
     assert first == second
 
 

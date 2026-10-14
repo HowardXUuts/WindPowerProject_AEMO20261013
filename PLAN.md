@@ -18,7 +18,9 @@ the repository as built; section 3 marks what is done and what remains.
 │   ├── nemweb.py                   # shared: list, download, parse, watermark, write
 │   ├── cli.py                      # shared argparse entry point
 │   ├── ingest_scada.py             # ReportSpec: Dispatch_SCADA → bronze/scada
-│   ├── ingest_price.py             # ReportSpec: DispatchIS   → bronze/price
+│   ├── ingest_dispatchis.py        # ReportSpec: DispatchIS   → bronze/price,
+│   │                               #   regionsum, interconnector (one download)
+│   ├── inspect_report.py           # print a report's real headers; writes nothing
 │   ├── refresh_reference.py        # wind DUID registry from the AEMO list
 │   ├── build_silver.py             # wind filter, typing, dedup, validation
 │   ├── check_quality.py            # quality checks, hard fail / soft warn
@@ -223,7 +225,7 @@ inspected.
    table) and write one Parquet file per source file, partitioned by NEM date. ✓
 10. Parser and bronze tests against CSV fixtures, including a multi-table
     report and a corrupt file. ✓
-11. Second source: `ingest_price.py` for DispatchIS `DISPATCH_PRICE`, sharing
+11. Second source: `ingest_dispatchis.py` for DispatchIS `DISPATCH_PRICE`, sharing
     the same core through a `ReportSpec`. ✓
 
 **Phase 3 — Silver and quality** — *silver done, quality outstanding*
@@ -552,7 +554,7 @@ correlate heavily and would do better:
 | Features (50 cols) | 551 KB | **201 MB** | **No — derived** |
 | Predictions (4 targets) | 46 KB | **17 MB** | Yes |
 | Model files | — | ~60 MB if monthly | **No** |
-| `P5MIN` bronze | — | ~15 MB | Yes |
+| `P5MIN` bronze | — | ~4 MB day-grain / ~30 MB hour-grain | Yes |
 
 Committing features would cost more than the entire existing pipeline and push
 the repository past GitHub's 1 GB recommendation inside two years. They are
@@ -565,6 +567,27 @@ a release.
 
 **ML therefore adds about 32 MB a year**, taking the project to roughly
 330 MB a year. The budget decision stands.
+
+**Bronze grain for the feature sources (measured 2026-10-14).** The four new
+bronze tables are far thinner per interval than Dispatch SCADA: 5 regions or
+6 interconnectors, against 517 DUIDs. At that cardinality an hour file is
+mostly Parquet footer — the fixed cost is about 1.5 KB empty and 2.3 KB of a
+2.5 KB file holding 60 rows.
+
+| Source | Rows/day | Hour grain | Day grain |
+|--------|----------|-----------|----------|
+| `regionsum` | 1,440 | 25.6 MB/yr | **1.9 MB/yr** |
+| `interconnector` | 1,728 | 19.0 MB/yr | **1.5 MB/yr** |
+| `p5min` | 17,280 | 29.9 MB/yr | **4.1 MB/yr** |
+| `predispatch` | 960 | 18.7 MB/yr | **1.1 MB/yr** |
+| **Total** | | **93.2 MB/yr** | **8.6 MB/yr** |
+
+This is the same arithmetic the layer contract already does for bronze, giving
+the opposite answer: hour files won for SCADA because 6,118 rows amortise the
+footer, and lose here because 40 to 720 rows do not. Day files keep the
+write-once property as long as a day is written only once closed, which is the
+rule silver already follows. The contract currently says hour, so these sources
+are built at hour grain until that decision is taken.
 
 Model outputs get their own tree, because they do not all behave the same way:
 

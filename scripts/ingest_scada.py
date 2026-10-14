@@ -15,17 +15,21 @@ import sys
 from typing import Final
 
 from cli import main_for
-from nemweb import Column, ReportSpec, as_float, as_settlement_date, as_text
+from nemweb import Column, ReportSpec, TableSpec, as_float, as_settlement_date, as_text
 
 SCADA: Final = ReportSpec(
-    key="scada",
     url="https://nemweb.com.au/Reports/Current/Dispatch_SCADA/",
     file_prefix="PUBLIC_DISPATCHSCADA",
-    table="DISPATCH_UNIT_SCADA",
-    columns=(
-        Column("settlementdate", "TIMESTAMPTZ", "SETTLEMENTDATE", as_settlement_date),
-        Column("duid", "VARCHAR", "DUID", as_text),
-        Column("scadavalue", "DOUBLE", "SCADAVALUE", as_float),
+    tables=(
+        TableSpec(
+            key="scada",
+            table="DISPATCH_UNIT_SCADA",
+            columns=(
+                Column("settlementdate", "TIMESTAMPTZ", "SETTLEMENTDATE", as_settlement_date),
+                Column("duid", "VARCHAR", "DUID", as_text),
+                Column("scadavalue", "DOUBLE", "SCADAVALUE", as_float),
+            ),
+        ),
     ),
 )
 

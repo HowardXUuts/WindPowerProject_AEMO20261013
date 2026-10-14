@@ -15,7 +15,7 @@ def main_for(spec: ReportSpec, doc: str | None = None) -> Callable[[list[str] | 
     """Build a ``main`` function for one report."""
 
     def main(argv: list[str] | None = None) -> int:
-        summary = (doc or "").strip().splitlines()[0] if doc else f"Ingest {spec.key}."
+        summary = (doc or "").strip().splitlines()[0] if doc else f"Ingest {spec.file_prefix}."
         parser = argparse.ArgumentParser(description=summary)
         parser.add_argument("--limit", type=int, default=None, help="ingest at most N files")
         parser.add_argument("--list-only", action="store_true", help="print pending files")
@@ -31,10 +31,10 @@ def main_for(spec: ReportSpec, doc: str | None = None) -> Callable[[list[str] | 
         try:
             run(spec, limit=args.limit, list_only=args.list_only, bronze_dir=args.bronze_dir)
         except httpx.HTTPError as exc:
-            LOG.error("[%s] could not reach AEMO: %s", spec.key, exc)
+            LOG.error("[%s] could not reach AEMO: %s", spec.file_prefix, exc)
             return 1
         except ListingError as exc:
-            LOG.error("[%s] %s", spec.key, exc)
+            LOG.error("[%s] %s", spec.file_prefix, exc)
             return 1
         return 0
 
