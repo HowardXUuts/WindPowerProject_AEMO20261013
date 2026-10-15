@@ -1,0 +1,114 @@
+[
+  {
+    "id": "farm_count",
+    "question": "How many wind farms are in the dataset?",
+    "reference_sql": "SELECT count(DISTINCT duid) AS farms FROM farm_daily"
+  },
+  {
+    "id": "total_capacity",
+    "question": "What is the total registered wind capacity, in MW?",
+    "reference_sql": "SELECT round(sum(capacity_mw), 1) AS total_capacity_mw FROM (SELECT duid, any_value(capacity_mw) AS capacity_mw FROM farm_daily GROUP BY duid)"
+  },
+  {
+    "id": "regions_present",
+    "question": "Which NEM regions have wind farms, and how many in each?",
+    "reference_sql": "SELECT region, count(DISTINCT duid) AS farms FROM farm_daily GROUP BY region ORDER BY region"
+  },
+  {
+    "id": "latest_day",
+    "question": "What is the most recent trading date in the data?",
+    "reference_sql": "SELECT max(trading_date) AS latest_trading_date FROM farm_daily"
+  },
+  {
+    "id": "best_cf_farm",
+    "question": "Which wind farm had the highest capacity factor on a complete day?",
+    "reference_sql": "SELECT station_name, region, trading_date, round(capacity_factor, 4) AS capacity_factor FROM farm_daily WHERE is_complete ORDER BY capacity_factor DESC LIMIT 1"
+  },
+  {
+    "id": "top_revenue_farms",
+    "question": "Which five farms earned the most revenue in total?",
+    "reference_sql": "SELECT station_name, region, round(sum(revenue_aud), 2) AS revenue_aud FROM farm_revenue_daily GROUP BY station_name, region ORDER BY revenue_aud DESC LIMIT 5"
+  },
+  {
+    "id": "negative_revenue_farms",
+    "question": "Which farms made negative revenue overall?",
+    "reference_sql": "SELECT station_name, region, round(sum(revenue_aud), 2) AS revenue_aud FROM farm_revenue_daily GROUP BY station_name, region HAVING sum(revenue_aud) < 0 ORDER BY revenue_aud LIMIT 50"
+  },
+  {
+    "id": "capture_ratio_by_region",
+    "question": "What is the average capture ratio for each region?",
+    "reference_sql": "SELECT region, round(avg(capture_ratio), 4) AS avg_capture_ratio FROM capture_price GROUP BY region ORDER BY avg_capture_ratio"
+  },
+  {
+    "id": "worst_cannibalisation",
+    "question": "On which day and in which region did wind suffer the worst cannibalisation discount?",
+    "reference_sql": "SELECT trading_date, region, round(capture_ratio, 4) AS capture_ratio, round(capture_price_aud_mwh, 2) AS capture_price_aud_mwh, round(twap_aud_mwh, 2) AS twap_aud_mwh FROM capture_price WHERE capture_ratio IS NOT NULL ORDER BY capture_ratio LIMIT 1"
+  },
+  {
+    "id": "negative_price_share",
+    "question": "What share of wind energy was sold at a negative price, by region?",
+    "reference_sql": "SELECT region, round(100.0 * sum(negative_price_mwh) / nullif(sum(energy_mwh), 0), 2) AS negative_pct FROM farm_revenue_daily GROUP BY region ORDER BY negative_pct DESC"
+  },
+  {
+    "id": "fleet_energy",
+    "question": "How much energy did the whole wind fleet generate, in GWh?",
+    "reference_sql": "SELECT round(sum(energy_mwh) / 1000.0, 3) AS total_gwh FROM farm_daily"
+  },
+  {
+    "id": "capture_vs_twap",
+    "question": "In which regions did wind earn more per MWh than the time-weighted average price?",
+    "reference_sql": "SELECT region, round(avg(capture_ratio), 4) AS avg_capture_ratio FROM capture_price GROUP BY region HAVING avg(capture_ratio) > 1 ORDER BY avg_capture_ratio DESC"
+  },
+  {
+    "id": "fleet_now",
+    "question": "How much wind is generating right now, and what percentage of capacity is that?",
+    "reference_sql": "SELECT round(sum(mw), 1) AS fleet_mw, round(sum(capacity_mw), 1) AS fleet_capacity_mw, round(100.0 * sum(mw) / nullif(sum(capacity_mw), 0), 1) AS pct_of_capacity FROM latest_snapshot"
+  },
+  {
+    "id": "region_now",
+    "question": "Which region is generating the most wind right now?",
+    "reference_sql": "SELECT region, round(sum(mw), 1) AS mw FROM latest_snapshot GROUP BY region ORDER BY mw DESC LIMIT 1"
+  },
+  {
+    "id": "windiest_hour",
+    "question": "Which hour of the day has the highest average wind output across all regions?",
+    "reference_sql": "SELECT extract('hour' FROM hour_nem) AS hour_of_day, round(avg(avg_mw), 1) AS avg_mw FROM region_hourly GROUP BY hour_of_day ORDER BY avg_mw DESC LIMIT 1"
+  },
+  {
+    "id": "sa_hourly_profile",
+    "question": "What is the average hourly wind output in South Australia by hour of day?",
+    "reference_sql": "SELECT extract('hour' FROM hour_nem) AS hour_of_day, round(avg(avg_mw), 1) AS avg_mw FROM region_hourly WHERE region = 'SA1' GROUP BY hour_of_day ORDER BY hour_of_day"
+  },
+  {
+    "id": "quality_failures",
+    "question": "Are there any data quality checks that are not passing?",
+    "reference_sql": "SELECT check_name, severity, status, message FROM quality WHERE status <> 'pass' ORDER BY severity, check_name"
+  },
+  {
+    "id": "incomplete_days",
+    "question": "Which trading dates have incomplete data?",
+    "reference_sql": "SELECT DISTINCT trading_date, max(intervals) AS intervals FROM farm_daily WHERE NOT is_complete GROUP BY trading_date ORDER BY trading_date"
+  },
+  {
+    "id": "biggest_farms",
+    "question": "What are the ten largest wind farms by registered capacity?",
+    "reference_sql": "SELECT station_name, region, round(any_value(capacity_mw), 1) AS capacity_mw FROM farm_daily GROUP BY duid, station_name, region ORDER BY capacity_mw DESC LIMIT 10"
+  },
+  {
+    "id": "realised_price_spread",
+    "question": "What was the highest and lowest capture price any farm achieved on a single day?",
+    "reference_sql": "SELECT round(max(realised_price_aud_mwh), 2) AS highest, round(min(realised_price_aud_mwh), 2) AS lowest FROM farm_revenue_daily WHERE realised_price_aud_mwh IS NOT NULL"
+  },
+  {
+    "id": "unanswerable_solar",
+    "question": "How much solar generation was there yesterday?",
+    "reference_sql": "SELECT 'cannot answer from the available tables' AS note",
+    "note": "Gold holds wind only. The model should decline rather than invent a table."
+  },
+  {
+    "id": "unanswerable_five_minute",
+    "question": "Show me the five-minute output of Ararat Wind Farm last Tuesday.",
+    "reference_sql": "SELECT 'cannot answer from the available tables' AS note",
+    "note": "Gold's finest per-farm grain is daily; latest_snapshot holds one interval only."
+  }
+]

@@ -38,3 +38,10 @@ jobs:
         # Network-marked tests are deselected by pyproject's addopts; the suite
         # runs entirely against fixtures.
         run: pytest -q
+
+      - name: Assistant eval
+        # No credential and no network: the eval serves recorded replies where
+        # they exist, and always re-runs every reference query against the
+        # committed gold layer. That second part is what stops the question set
+        # rotting silently when the gold schema moves.
+        run: python assistant/eval.py

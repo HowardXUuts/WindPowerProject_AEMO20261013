@@ -9,7 +9,7 @@ piece. It ingests two AEMO 5-minute feeds — dispatch SCADA (MW per unit) and
 dispatch price (RRP per region) — keeps only wind farm units from silver
 onward, and refines them through bronze / silver / gold Parquet layers. Joining
 output to price is what turns generation volume into revenue, capture price and
-negative-price exposure. A static dashboard and a Claude-powered Q&A assistant
+negative-price exposure. A static dashboard and a question-to-SQL assistant
 sit on top, and a forecasting phase predicts regional price for a battery
 arbitrage backtest.
 
@@ -29,7 +29,8 @@ repo should read as production-minded work, not a notebook dump.
 2. A clean medallion architecture that someone can follow end to end.
 3. Small repo: wind DUIDs only from silver onward, write-once bronze files.
 4. A static dashboard on GitHub Pages, built from the gold layer.
-5. A Q&A assistant that answers questions over gold tables via the Claude API.
+5. A Q&A assistant that turns a question into read-only SQL over the gold
+   tables, via any OpenAI-compatible model API.
 6. A regional price forecast (mean and spike probability over 60 and 120
    minutes) evaluated against AEMO's own forecast, and a battery arbitrage
    backtest that turns it into dollars.
@@ -196,14 +197,17 @@ these are not negotiable:
 
 ## Security
 
-- Never commit secrets, API keys, or tokens. The only secret in this project is
-  `ANTHROPIC_API_KEY`, which lives in GitHub Actions secrets and is read from
-  the environment at runtime.
-- Never add a credential to a workflow file, a config file, a test fixture, or a
-  commit message. If something is needed locally, it goes in `.env`, which is
-  gitignored.
-- AEMO data is public and unauthenticated. Nothing in this pipeline should ever
-  need an outbound credential except the Claude API call.
+- Never commit secrets, API keys, or tokens, and never add a credential to a
+  workflow file, a config file, a test fixture, or a commit message. A
+  credential needed locally goes in `.env`, which is gitignored.
+- **No GitHub Actions secret is configured, and none should need to be.** The
+  pipeline takes public, unauthenticated AEMO feeds and writes files; CI runs
+  the assistant against recorded replies. A fork clones and goes green with no
+  setup, which is worth protecting.
+- The assistant is the one component that can call out, to an
+  OpenAI-compatible endpoint named by `ASSISTANT_PROVIDER`. Its key
+  (`DEEPSEEK_API_KEY` by default) is read from the environment at runtime, is
+  optional, and must stay optional: every code path has to work without it.
 
 ## Working style
 
