@@ -20,7 +20,7 @@ No cloud account, no database server, no paid services.
                  ├─▶ raw zips ──▶ bronze ──▶ silver ──▶ gold ──▶      │
  DispatchIS      │   transient     write-once   wind only   joined        ▼
   $/MWh per      ┘   (not kept)    per file     typed &     volume   Q&A assistant
-  region                                         validated   x price  (Claude API)
+  region                                         validated   x price  (SQL via LLM)
 ```
 
 | Layer | What it holds |
@@ -31,7 +31,11 @@ No cloud account, no database server, no paid services.
 
 ## Stack
 
-Python 3.11 · DuckDB · Parquet · GitHub Actions · GitHub Pages · Claude API
+Python 3.11 · DuckDB · Parquet · GitHub Actions · GitHub Pages
+
+No new dependencies for the assistant: any OpenAI-compatible endpoint over the
+`httpx` the pipeline already uses. No API key is required to clone, test or
+run CI.
 
 ## Data source
 
@@ -59,7 +63,8 @@ joins the two into a wind-only, quality-flagged table, one immutable file per
 trading date, and gold turns that into revenue, capture price and a live fleet
 snapshot. A static dashboard on GitHub Pages reads JSON slices exported from
 gold: a fleet overview, and a per-farm page that pairs each farm's output shape
-with its region's price shape. The Q&A assistant is next.
+with its region's price shape. The assistant turns a question into read-only
+SQL over gold and prints the answer with the query that produced it.
 
 See [`PLAN.md`](PLAN.md) for the repository layout, design decisions, and build
 steps.
@@ -79,9 +84,19 @@ Locally:
 ```bash
 python3.11 -m venv .venv && source .venv/bin/activate
 pip install '.[dev,reference]'
-pytest -q                                    # 227 tests, no network needed
+pytest -q                                    # 273 tests, no network needed
 python scripts/export_dashboard.py           # gold + silver -> docs/data/
 python -m http.server 8000 --directory docs  # then open localhost:8000
+
+python assistant/eval.py                     # scores the assistant; no key needed
+python assistant/qa.py "which farms earned the most?"
+```
+
+The assistant needs a model API key only to answer *new* questions. Put one in
+`.env` (gitignored):
+
+```bash
+DEEPSEEK_API_KEY=sk-...        # or ASSISTANT_PROVIDER=openai + OPENAI_API_KEY
 ```
 
 ## Background

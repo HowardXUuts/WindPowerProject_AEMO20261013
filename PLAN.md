@@ -60,9 +60,13 @@ the repository as built; section 3 marks what is done and what remains.
 │   └── data/                       # small JSON extracts the page fetches
 │
 ├── assistant/
-│   ├── schema.md                   # table and column descriptions given to Claude
-│   ├── prompts/                    # system prompt and few-shot examples
-│   └── qa.py                       # NL question → DuckDB SQL → answer
+│   ├── schema.md                   # table and column descriptions given to the model
+│   ├── prompts/system.md           # the rules the generated SQL must obey
+│   ├── provider.py                 # any OpenAI-compatible endpoint, over httpx
+│   ├── guard.py                    # allowlist + sandbox for generated SQL
+│   ├── qa.py                       # NL question → DuckDB SQL → answer
+│   ├── eval.py                     # score the model against the question set
+│   └── evals/                      # questions.json + recorded replies
 │
 ├── tests/
 │   ├── fixtures/                   # trimmed AEMO CSVs, committed
@@ -197,11 +201,12 @@ Nothing in the codebase handles a naive datetime.
 Pages workflow exports small JSON slices from gold into `docs/data/` and the
 page renders them client-side. No API, nothing to keep running.
 
-**The assistant generates SQL, it does not read the data.** Claude is given the
-gold schema and the question, returns a read-only DuckDB query, and the query
-runs locally against the Parquet files. This keeps token usage flat regardless
-of dataset size, and makes every answer traceable to a query that can be
-inspected.
+**The assistant generates SQL, it does not read the data.** The model is given
+the gold schema and the question, returns a read-only DuckDB query, and the
+query runs locally against the Parquet files. Token usage stays flat regardless
+of how much history accumulates, the data never leaves the machine, and every
+answer is traceable to a query that can be inspected — which is the only way to
+trust a number a language model had a hand in.
 
 ## 3. Build steps
 
@@ -299,11 +304,43 @@ inspected.
     — the live data already shows farms with the fleet's best capacity factors
     earning negative revenue.
 
-**Phase 7 — Assistant**
-20. `assistant/schema.md` and the system prompt describing the gold tables.
-21. `qa.py`: question → SQL via the Claude API → execute read-only → format the
-    answer with the query shown.
-22. An eval set of ~20 questions with expected answers, run in CI.
+**Phase 7 — Assistant** — *done*
+20. `assistant/schema.md` and `assistant/prompts/system.md`: the gold tables,
+    their units, and the handful of things that are easy to get wrong (capacity
+    factor is a fraction; rank on revenue not yield; exclude incomplete days). ✓
+21. `qa.py`: question → SQL → execute read-only → print the answer **with the
+    query that produced it**. A number whose query is hidden is a number nobody
+    can check, and this one was written by a language model. ✓
+22. `evals/questions.json`: 22 questions, run by `eval.py` in CI. ✓
+
+    **Provider-neutral, over any OpenAI-compatible endpoint.** DeepSeek by
+    default, selectable with `ASSISTANT_PROVIDER`. That shape is worth more
+    than any one vendor: `POST /chat/completions` is served by nearly everyone,
+    so `httpx` — already a dependency — is the whole client and the assistant
+    adds **nothing to install**.
+
+    **Two independent defences on generated SQL** (`guard.py`), because either
+    alone is a single point of failure. A statement allowlist: exactly one
+    statement, SELECT or WITH only, with a splitter that does not mistake a
+    semicolon inside a string literal for a second statement. And a sandbox:
+    gold is copied into an in-memory database and `enable_external_access` is
+    switched off, which DuckDB will not let a later statement switch back on.
+    So a query that defeats the allowlist still cannot read a file, ATTACH a
+    database, COPY data out or INSTALL an extension.
+
+    **The repository needs no credential.** Model replies are recorded under
+    `evals/recordings/`, keyed by a hash of the exact prompt and model, and
+    served in place of a request. CI runs the eval with no key and no network;
+    a fork goes green with no setup. `--record` writes recordings when a key is
+    present.
+
+    **The eval compares results, not SQL text.** Two correct queries for the
+    same question differ in alias, join order and whitespace, so scoring
+    strings would score style. Each question carries a reference query and the
+    model passes when its query returns the same values. With no recordings the
+    run reports that the model was not scored rather than claiming a number —
+    and still re-runs every reference query against the live gold schema, which
+    is what stops the question set rotting as that schema moves.
 
 **Phase 8 — Polish**
 23. Architecture diagram and a data dictionary in the README.
