@@ -312,7 +312,12 @@ inspected.
 
 **Phase 9 — Forecasting and battery arbitrage** — *see section 4*
 
-B2 (bronze feature sources) — *done*. `ingest_dispatchis.py` writes `price`,
+B2 (bronze feature sources) — *done*. PredispatchIS `Current` retains about
+**15 days**, not the two days the other reports hold: the first run backfilled
+2026-10-01 to 2026-10-15 unprompted. Worth knowing for a phase whose binding
+constraint is history.
+
+ `ingest_dispatchis.py` writes `price`,
 `regionsum` and `interconnector` from one download; `ingest_p5min.py` writes
 `p5min`; `ingest_predispatch.py` writes `predispatch_price` and
 `predispatch_region` from one download. Every column name was read off a live
@@ -569,7 +574,7 @@ correlate heavily and would do better:
 | Features (50 cols) | 551 KB | **201 MB** | **No — derived** |
 | Predictions (4 targets) | 46 KB | **17 MB** | Yes |
 | Model files | — | ~60 MB if monthly | **No** |
-| `P5MIN` bronze | — | ~4 MB day-grain / ~30 MB hour-grain | Yes |
+| `P5MIN` bronze | 312 KB | ~110 MB hour-grain / ~82 MB day-grain | Yes |
 
 Committing features would cost more than the entire existing pipeline and push
 the repository past GitHub's 1 GB recommendation inside two years. They are
@@ -589,18 +594,36 @@ bronze tables are far thinner per interval than Dispatch SCADA: 5 regions or
 mostly Parquet footer — the fixed cost is about 1.5 KB empty and 2.3 KB of a
 2.5 KB file holding 60 rows.
 
-| Source | Rows/day | Hour grain | Day grain |
-|--------|----------|-----------|----------|
-| `regionsum` | 1,440 | 32.2 MB/yr | **2.1 MB/yr** |
-| `interconnector` | 2,016 | 17.6 MB/yr | **1.5 MB/yr** |
-| `p5min` | 17,280 | 38.7 MB/yr | **5.3 MB/yr** |
-| `predispatch_price` | 960 | 19.9 MB/yr | **1.1 MB/yr** |
-| `predispatch_region` | 960 | 27.5 MB/yr | **1.5 MB/yr** |
-| **Total** | | **136.0 MB/yr** | **11.5 MB/yr** |
-
 Five tables, not four: PredispatchIS keeps its regional prices and its regional
 solution in separate tables (`PREDISPATCH_REGION_PRICES` and
 `PREDISPATCH_REGION_SOLUTION`), so each becomes its own bronze table.
+
+**Superseded. Measured on committed data, 2026-10-15.** The table that stood
+here was built from synthetic rows — smooth sine waves across five regions —
+and it was wrong, badly on one side. Such values compress far better than real
+AEMO data when a day of them is concatenated into one file, so the day-grain
+column was optimistic by roughly ten times. Real numbers, taking one full day
+of each table as committed and rewriting it as a single Parquet file:
+
+| Source | Hour files | Hour grain | Day grain | Saving |
+|--------|-----------|-----------|----------|--------|
+| `regionsum` | 19 | 108 KB/day | 49 KB/day | 2.2x |
+| `interconnector` | 19 | 72 KB/day | 32 KB/day | 2.2x |
+| `p5min` | 24 | 312 KB/day | 225 KB/day | 1.4x |
+| `predispatch_price` | 24 | 68 KB/day | 9 KB/day | 7.6x |
+| `predispatch_region` | 24 | 108 KB/day | 24 KB/day | 4.5x |
+| **Total** | | **233 MB/yr** | **118 MB/yr** | **2.0x** |
+
+The shape of the argument survives and its force does not. Day files still win
+everywhere, and win most where rows per hour are fewest — 7.6x on the 40-row
+predispatch price table against 1.4x on the 720-row P5MIN. But the saving is
+2x overall, not 12x, and hour grain costs 233 MB a year rather than 136.
+
+Trimming P5MIN's horizon is not the alternative lever it looks like: keeping 6
+of its 12 intervals saves only 1.5x, because the per-file footer and the
+repeated run and interval timestamps dominate, and a 30-minute horizon cannot
+serve the 60-minute target in 4.2. P5MIN's ~110 MB a year is close to
+irreducible at this grain.
 
 This is the same arithmetic the layer contract already does for bronze, giving
 the opposite answer: hour files won for SCADA because 6,118 rows amortise the
@@ -609,11 +632,12 @@ write-once property as long as a day is written only once closed, which is the
 rule silver already follows. The contract currently says hour, so these sources
 are built at hour grain until that decision is taken.
 
-At hour grain these five tables cost more per year than the entire existing
-pipeline, and would take the project from roughly 235 MB a year to 370 MB. At
-day grain they cost 11.5 MB and the ML phase lands inside the 32 MB a year it
-was budgeted. Nothing about the data changes between the two — only the number
-of Parquet footers written.
+At hour grain these five tables cost about 233 MB a year, which is more than
+the entire existing pipeline and takes the project to roughly 470 MB a year. At
+day grain they cost 118 MB. Neither lands inside the 32 MB a year section 4.8
+budgeted for the whole ML phase, so that budget needs revisiting whichever
+grain is chosen. Nothing about the data changes between the two — only the
+number of Parquet footers written.
 
 They are ingested at hour grain in the meantime rather than held back, because
 the two costs are not symmetric: AEMO retains about two days, so an hour not
