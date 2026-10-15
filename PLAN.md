@@ -484,6 +484,38 @@ because it introduces a second source with a genuinely harder leakage problem
 
 ### 4.4 Leakage rules
 
+**Measured, 2026-10-15.** The rules below assumed one interval of slack for
+publication lag. That assumption is now partly measured and partly still open.
+AEMO stamps its own write time into the forecast reports, and the file name
+carries the publication instant, so the lag is observable rather than guessed
+— once the file-name stamp is read as NEM local time, which is the whole trick:
+parsed naively it reads as UTC and every figure comes out exactly ten hours
+wrong.
+
+| Report | AEMO writes → publishes | Published vs the run it is named for | Lead to the interval forecast | Published late |
+|---|---|---|---|---|
+| `P5MIN` (32,040 rows) | 2.3 s | **1.95–4.47 min early** | 2–60 min | **0** |
+| `PredispatchIS` (13,520 rows) | 9.8 s | — (no run timestamp) | 11–119 min | **0** |
+
+Two things follow. Gating a `P5MIN` feature on `RUN_DATETIME <= t` is
+**conservative**: the run is on the server about four minutes before the time
+it is named for, so the rule gives away a little information rather than
+leaking any. And `PredispatchIS`'s nearest period is only **11 minutes** ahead
+at its tightest, not the half hour its cadence suggests — a backtest that
+assumes a half-hour horizon from it is assuming lead time that does not exist.
+
+**Still open: the dispatch reports.** `ingested_at` cannot answer this. It
+records when *this pipeline* ran — a median of ten hours after the interval,
+because bronze is written an hour at a time — and says nothing about AEMO. The
+one live sample seen during inspection had `LASTCHANGED` 09:45:09 against
+`SETTLEMENTDATE` 09:50:00, which would mean a dispatch result is published at
+roughly its interval's *start*, nearly five minutes before the stamp it
+carries, because dispatch is solved forward. One sample is not a measurement,
+so `LASTCHANGED` is now ingested on all three dispatch tables and this can be
+settled from committed data in a few days.
+
+
+
 These are the rules the whole phase stands on. A leaked feature produces a
 model that looks superb and earns nothing.
 

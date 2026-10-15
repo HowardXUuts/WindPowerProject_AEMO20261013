@@ -217,13 +217,13 @@ def test_predispatch_filename_parses():
 
 REGIONSUM_HEADER = (
     "I,DISPATCH,REGIONSUM,1,SETTLEMENTDATE,RUNNO,REGIONID,DISPATCHINTERVAL,INTERVENTION,"
-    "TOTALDEMAND,AVAILABLEGENERATION,NETINTERCHANGE,UIGF,SS_SOLAR_UIGF,SS_WIND_UIGF,"
-    "BDU_ENERGY_STORAGE,BDU_CLEAREDMW_GEN,BDU_CLEAREDMW_LOAD"
+    "TOTALDEMAND,AVAILABLEGENERATION,NETINTERCHANGE,LASTCHANGED,UIGF,SS_SOLAR_UIGF,"
+    "SS_WIND_UIGF,BDU_ENERGY_STORAGE,BDU_CLEAREDMW_GEN,BDU_CLEAREDMW_LOAD"
 )
 REGIONSUM_ROW = (
     'D,DISPATCH,REGIONSUM,1,"2026/10/15 09:50:00",1,NSW1,20261015070,0,'
-    "6338.75,14671.58517,-656.12,4585.85791,3508.36625,1077.49166,"
-    "2911.093790,0,527.992520"
+    '6338.75,14671.58517,-656.12,"2026/10/15 09:45:09",'
+    "4585.85791,3508.36625,1077.49166,2911.093790,0,527.992520"
 )
 
 INTERCONNECTOR_HEADER = (
@@ -260,6 +260,21 @@ def test_regionsum_carries_battery_storage():
     at = columns_of(REGIONSUM_TABLE)
     assert rows[0][at["bdu_energy_storage"]] == pytest.approx(2911.09379)
     assert rows[0][at["bdu_clearedmw_load"]] == pytest.approx(527.99252)
+
+
+def test_dispatch_records_when_aemo_wrote_the_row():
+    """The leakage gate stands on this column, so it has to be real.
+
+    Dispatch is solved forward: the result stamped 09:50 was written at
+    09:45:09, nearly five minutes earlier. Without LASTCHANGED there is nothing
+    in bronze that says when a dispatch result became available — ingested_at
+    records when this pipeline ran, a median of ten hours later.
+    """
+    rows = extract_rows(REGIONSUM_TABLE, DISPATCHIS_CSV, DIS_FILE)
+    at = columns_of(REGIONSUM_TABLE)
+    row = rows[0]
+    assert row[at["lastchanged"]] == datetime(2026, 10, 15, 9, 45, 9, tzinfo=NEM_TZ)
+    assert row[at["lastchanged"]] < row[at["settlementdate"]]
 
 
 def test_interconnector_keeps_flow_and_both_limits():
