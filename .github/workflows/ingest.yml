@@ -33,8 +33,9 @@ jobs:
     runs-on: ubuntu-latest
     # Generous because a run after a long gap downloads every missed interval:
     # a full two-day backlog is about 576 files per source, fetched one at a
-    # time. A normal hourly run finishes in under a minute.
-    timeout-minutes: 45
+    # time, and P5MIN's are 240 KB each against DispatchIS's 40 KB. A normal
+    # hourly run finishes in a couple of minutes.
+    timeout-minutes: 60
 
     steps:
       - uses: actions/checkout@v4
@@ -64,6 +65,22 @@ jobs:
         env:
           LIMIT: ${{ inputs.limit }}
 
+      - name: Ingest P5MIN (five-minute pre-dispatch forecast)
+        # AEMO's own forecast: the strongest feature in the plan and the
+        # baseline it has to beat. Independent of the others, as always.
+        if: always()
+        run: python scripts/ingest_p5min.py ${LIMIT:+--limit "$LIMIT"}
+        env:
+          LIMIT: ${{ inputs.limit }}
+
+      - name: Ingest PredispatchIS (half-hourly forecast)
+        # One file every 30 minutes rather than every 5, so this is the cheapest
+        # of the four in files and the dearest per file (0.5-1.4 MB).
+        if: always()
+        run: python scripts/ingest_predispatch.py ${LIMIT:+--limit "$LIMIT"}
+        env:
+          LIMIT: ${{ inputs.limit }}
+
       - name: Commit new bronze files
         if: always()
         run: |
@@ -82,7 +99,8 @@ jobs:
 
           counts=""
           total=0
-          for source in scada price regionsum interconnector; do
+          for source in scada price regionsum interconnector p5min \
+                        predispatch_price predispatch_region; do
             n=$(git diff --cached --name-only -- "data/bronze/${source}" | grep -c '\.parquet$' || true)
             total=$((total + n))
             if [ "${n}" -gt 0 ]; then counts="${counts}${counts:+, }${n} ${source}"; fi

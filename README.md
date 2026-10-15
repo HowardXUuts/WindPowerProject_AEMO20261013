@@ -79,7 +79,7 @@ Locally:
 ```bash
 python3.11 -m venv .venv && source .venv/bin/activate
 pip install '.[dev,reference]'
-pytest -q                                    # 208 tests, no network needed
+pytest -q                                    # 227 tests, no network needed
 python scripts/export_dashboard.py           # gold + silver -> docs/data/
 python -m http.server 8000 --directory docs  # then open localhost:8000
 ```
