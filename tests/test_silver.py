@@ -60,7 +60,11 @@ def write_price(bronze_dir, rows):
     for settlement, region, intervention, rrp, source, ingested in rows:
         start = settlement - timedelta(minutes=5)
         by_hour.setdefault(start.replace(minute=0), []).append(
-            (settlement, region, intervention, 1, "i", rrp, 0.0, rrp, 0, 0, source, ingested)
+            # ..., apcflag, marketsuspendedflag, lastchanged, source_file, ingested_at.
+            # lastchanged is AEMO's own write time: dispatch is solved forward,
+            # so it sits a little before the interval-ending settlement stamp.
+            (settlement, region, intervention, 1, "i", rrp, 0.0, rrp, 0, 0,
+             settlement - timedelta(minutes=5), source, ingested)
         )
     for hour, hour_rows in by_hour.items():
         write_bronze(PRICE_TABLE, hour_rows, bronze_path(PRICE_TABLE, hour, bronze_dir))

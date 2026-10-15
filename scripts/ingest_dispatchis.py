@@ -40,6 +40,17 @@ from nemweb import Column, ReportSpec, TableSpec, as_float, as_int, as_settlemen
 # ---------------------------------------------------------------------------
 # DISPATCH_PRICE — what a megawatt hour was worth, per region per interval
 # ---------------------------------------------------------------------------
+# LASTCHANGED is when AEMO wrote the row, and it is the only thing in this
+# report that says when the result became available. Dispatch is solved
+# forward — the inspected file carried LASTCHANGED 09:45:09 against
+# SETTLEMENTDATE 09:50:00, so the price for an interval is published at roughly
+# that interval's *start*, nearly five minutes before the settlement stamp it
+# carries. The ML leakage rule (PLAN 4.4) gates every feature on when its input
+# was available, so this column is the difference between a measured gate and
+# an assumed one. ingested_at cannot stand in for it: it records when this
+# pipeline ran, which is a median of ten hours later and says nothing about
+# AEMO.
+# ---------------------------------------------------------------------------
 
 PRICE_TABLE: Final = TableSpec(
     key="price",
@@ -55,6 +66,7 @@ PRICE_TABLE: Final = TableSpec(
         Column("rop", "DOUBLE", "ROP", as_float),
         Column("apcflag", "INTEGER", "APCFLAG", as_int),
         Column("marketsuspendedflag", "INTEGER", "MARKETSUSPENDEDFLAG", as_int),
+        Column("lastchanged", "TIMESTAMPTZ", "LASTCHANGED", as_settlement_date),
     ),
 )
 
@@ -108,6 +120,7 @@ REGIONSUM_TABLE: Final = TableSpec(
         Column("bdu_energy_storage", "DOUBLE", "BDU_ENERGY_STORAGE", as_float, optional=True),
         Column("bdu_clearedmw_gen", "DOUBLE", "BDU_CLEAREDMW_GEN", as_float, optional=True),
         Column("bdu_clearedmw_load", "DOUBLE", "BDU_CLEAREDMW_LOAD", as_float, optional=True),
+        Column("lastchanged", "TIMESTAMPTZ", "LASTCHANGED", as_settlement_date),
     ),
 )
 
@@ -131,6 +144,7 @@ INTERCONNECTOR_TABLE: Final = TableSpec(
         Column("mwflow", "DOUBLE", "MWFLOW", as_float),
         Column("exportlimit", "DOUBLE", "EXPORTLIMIT", as_float),
         Column("importlimit", "DOUBLE", "IMPORTLIMIT", as_float),
+        Column("lastchanged", "TIMESTAMPTZ", "LASTCHANGED", as_settlement_date),
     ),
 )
 
