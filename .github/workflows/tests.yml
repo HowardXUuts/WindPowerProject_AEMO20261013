@@ -39,6 +39,15 @@ jobs:
         # runs entirely against fixtures.
         run: pytest -q
 
+      - name: ML feature build and readiness
+        # Builds the feature table from the committed silver layer and reports
+        # whether any region can yet be trained. It is green either way: "not
+        # enough data" is the expected state for months, and a red run every
+        # hour would train everyone to ignore it. What this does catch is the
+        # feature SQL breaking against a silver schema change, which is the
+        # failure that would otherwise surface in December.
+        run: python scripts/build_features.py --check
+
       - name: Assistant eval
         # No credential and no network: the eval serves recorded replies where
         # they exist, and always re-runs every reference query against the
