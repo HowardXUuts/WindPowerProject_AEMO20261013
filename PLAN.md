@@ -365,12 +365,16 @@ runs on demand and which writes nothing.
     up to regional totals.
 26. New bronze source: `P5MIN`, AEMO's own five-minute forecast, as the
     baseline to beat and as a feature.
-27. `scripts/build_features.py` + `sql/ml/`: one row per region per interval,
-    derived and not committed.
+27. `scripts/build_features.py` + `sql/ml/features.sql`: one row per region per
+    interval, 43 columns, derived and not committed. ✓
 28. `scripts/train_forecast.py`: walk-forward training for four targets, with
-    the purge and embargo described in section 4.
+    the purge and embargo described in section 4. **Harness done, model
+    pending** — `walkforward.py` cuts the folds, `sql/ml/baselines.sql` builds
+    the three comparators and `metrics.py` scores them. The estimator itself
+    waits on data: `build_features.py --check` refuses below 60 days and 30
+    spike episodes per region.
 29. `scripts/backtest_battery.py`: arbitrage simulation driven by the forecast,
-    measured against perfect foresight and a no-forecast threshold rule.
+    measured against perfect foresight and a no-forecast threshold rule. ✓
 30. Dashboard panels for forecast error against the baselines, spike
     reliability, and backtest revenue.
 
