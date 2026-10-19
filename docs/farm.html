@@ -97,6 +97,20 @@
     <div class="tablewrap" id="daily-table"></div>
   </section>
 
+  <section class="panel" id="corr-panel">
+    <div class="panel-head">
+      <div>
+        <h2>What this farm duplicates, and what it offsets</h2>
+        <p class="note" id="corr-note">Correlation of five-minute capacity factors
+           against every other farm in the fleet. The left-hand list is concentration:
+           assets whose output arrives when this one&rsquo;s does, into the price its
+           arrival helped set. The right-hand list is the diversification case &mdash;
+           the pairings that make a firmed product cheaper.</p>
+      </div>
+    </div>
+    <div class="two" id="corr-lists"></div>
+  </section>
+
   <section class="panel">
     <div class="panel-head">
       <div>
@@ -402,6 +416,40 @@
   }
 
   /* ---- selection -------------------------------------------------------- */
+  /* ---- correlation lists -------------------------------------------------
+     Two ranked lists rather than a chart: five names with a number each is
+     already the whole message, and a bar chart of five bars would be a chart
+     drawn because a chart was available. */
+  function renderCorrelation(rows) {
+    var panel = document.getElementById("corr-panel");
+    if (!rows.length) { panel.hidden = true; return; }
+    panel.hidden = false;
+
+    var listFor = function (relation, heading, blurb) {
+      var picked = rows.filter(function (r) { return r.relation === relation; })
+                       .sort(function (a, b) { return a.rank - b.rank; });
+      if (!picked.length) return "";
+      return '<div class="panel"><div class="panel-head"><div><h2>' + heading +
+        '</h2><p class="note">' + blurb + "</p></div></div>" +
+        '<div class="tablewrap"><table><thead><tr><th>Farm</th><th>Region</th>' +
+        '<th class="num">r</th></tr></thead><tbody>' +
+        picked.map(function (r) {
+          return "<tr><td>" + esc(r.other_name || r.other_duid) + "</td>" +
+            '<td><span class="dot" style="background:' + colourOf(r.other_region) +
+            '"></span>' + esc(r.other_region) +
+            (r.same_region ? "" : " \u00b7 interstate") + "</td>" +
+            '<td class="num">' + num(r.r, 2) + "</td></tr>";
+        }).join("") + "</tbody></table></div></div>";
+    };
+
+    document.getElementById("corr-lists").innerHTML =
+      listFor("most", "Moves with it",
+              "Highest correlation. Output that arrives at the same moment.") +
+      listFor("least", "Offsets it",
+              "Lowest correlation. A negative figure means the two genuinely " +
+              "push against each other.");
+  }
+
   function show(duid) {
     var farm = index.filter(function (r) { return r.duid === duid; })[0];
     if (!farm) return;
@@ -422,6 +470,7 @@
       renderShape(detail.shape || []);
       renderProfile(detail.profile || []);
       renderDaily(detail.daily || []);
+      renderCorrelation(detail.correlation || []);
     };
 
     if (cache[duid]) { render(cache[duid]); return; }

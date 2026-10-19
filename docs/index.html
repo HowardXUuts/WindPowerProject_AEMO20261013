@@ -190,6 +190,34 @@
   <section class="panel">
     <div class="panel-head">
       <div>
+        <h2>Do these farms generate at the same time?</h2>
+        <p class="note" id="corr-note">Mean correlation between two wind farms&rsquo;
+           five-minute capacity factors. The diagonal is two farms inside one region;
+           off the diagonal, one in each.</p>
+      </div>
+      <button class="toggle" data-target="corr-table-panel" aria-pressed="false">Table</button>
+    </div>
+    <div class="tablewrap" id="corr-matrix"></div>
+    <div class="scale" id="corr-scale"></div>
+  </section>
+
+  <section class="panel" id="corr-table-panel" hidden>
+    <div class="panel-head">
+      <div>
+        <h2>Correlation detail</h2>
+        <p class="note">Portfolio correlation is the two regions&rsquo; aggregate output
+           moving together, which runs stronger than the typical farm pair because
+           averaging within a region cancels the farm-level noise and leaves the shared
+           weather. The spread between the weakest and strongest pair is the reminder
+           that a regional mean is not a siting decision.</p>
+      </div>
+    </div>
+    <div class="tablewrap" id="corr-table"></div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <div>
         <h2>Revenue and capture detail</h2>
         <p class="note">Capture price is what wind earned per MWh; TWAP is what an even
            generator would have earned. Below 1.0 is the cannibalisation effect.</p>
@@ -250,7 +278,8 @@
     // the state of a fresh clone or a fork. Promise.all rejects on one failure,
     // so without this the whole dashboard goes blank over an optional panel.
     optional("cannibalisation"), optional("revenue_concentration"),
-    optional("negative_runs"), optional("negative_worst")
+    optional("negative_runs"), optional("negative_worst"),
+    optional("correlation")
   ]).then(function (all) {
     var fresh = all[0][0] || {};
     var today = all[1], cf = all[2], farms = all[3];
@@ -258,6 +287,7 @@
     var index = all[8] || [];
     var cannib = all[9] || [], conc = all[10] || [];
     var negRuns = all[11] || [], negWorst = all[12] || [];
+    var corr = all[13] || [];
 
     // Installed capacity per region, taken from the farm index so revenue can
     // be shown per MW. Absolute revenue only says which region is biggest.
@@ -891,6 +921,105 @@
          { label: "Wind MWh", num: true, get: function (r) { return num(r.wind_energy_mwh, 0); } },
          { label: "Revenue", num: true, get: function (r) { return money(r.revenue_aud); } }],
         negWorst);
+    }
+
+    /* ---- output correlation --------------------------------------------- */
+    if (!corr.length) {
+      dropPanel("corr-matrix");
+      dropPanel("corr-table");
+    }
+
+    if (corr.length) {
+      // Capped at 60% toward either pole: past that, light text on the dark-mode
+      // red stops clearing 4.5:1. Measured, not guessed — see style.css.
+      var CAP = 60;
+      var fill = function (r) {
+        if (r === null || r === undefined) return "var(--corr-zero)";
+        var pole = r < 0 ? "var(--corr-neg)" : "var(--corr-pos)";
+        var strength = (Math.min(Math.abs(r), 1) * CAP).toFixed(1);
+        // Declared twice on purpose: a browser without color-mix drops the
+        // second and keeps the neutral, leaving the printed number to carry it.
+        return "background:var(--corr-zero);background:color-mix(in oklab, " +
+               pole + " " + strength + "%, var(--corr-zero))";
+      };
+
+      var corrRegions = Array.from(new Set(corr.map(function (r) { return r.region_a; }))).sort();
+      var cell = {};
+      corr.forEach(function (r) { cell[r.region_a + "|" + r.region_b] = r; });
+
+      var head = "<tr><th></th>" + corrRegions.map(function (r) {
+        return '<th class="num"><span class="dot" style="background:' + colourOf(r) +
+               '"></span>' + esc(r) + "</th>";
+      }).join("") + "</tr>";
+
+      var body = corrRegions.map(function (a) {
+        return '<tr><th class="rowhead"><span class="dot" style="background:' + colourOf(a) +
+          '"></span>' + esc(a) + "</th>" + corrRegions.map(function (b) {
+            var row = cell[a + "|" + b];
+            if (!row) return '<td class="cell">&mdash;</td>';
+            var hint = a === b
+              ? row.farm_pairs + " farm pairs inside " + a
+              : row.farm_pairs + " farm pairs, one in each; portfolio correlation " +
+                num(row.portfolio_r, 2);
+            hint += "; weakest " + num(row.min_r, 2) + ", strongest " + num(row.max_r, 2);
+            return '<td class="cell' + (a === b ? " diag" : "") + '" style="' + fill(row.mean_r) +
+                   '" title="' + esc(hint) + '">' + num(row.mean_r, 2) + "</td>";
+          }).join("") + "</tr>";
+      }).join("");
+
+      document.getElementById("corr-matrix").innerHTML =
+        '<table class="matrix"><thead>' + head + "</thead><tbody>" + body + "</tbody></table>";
+
+      // The legend has to say what the two poles mean, because "negative" is
+      // the good end here and that is not the convention a reader arrives with.
+      var steps = [-1, -0.5, 0, 0.5, 1];
+      document.getElementById("corr-scale").innerHTML =
+        "<span>offsetting</span><span class=\"swatches\">" +
+        steps.map(function (r) { return '<span style="' + fill(r) + '"></span>'; }).join("") +
+        "</span><span>moves together</span>" +
+        '<span style="margin-left:auto">&minus;1 independent at 0 &plus;1 &middot; ' +
+        'every cell prints its number, so colour is never the only encoding</span>';
+
+      var same = corr.filter(function (r) { return r.is_same_region; });
+      var cross = corr.filter(function (r) { return !r.is_same_region; });
+      var meanOf = function (rows) {
+        if (!rows.length) return null;
+        return rows.reduce(function (a, r) { return a + (r.mean_r || 0); }, 0) / rows.length;
+      };
+      var sameMean = meanOf(same), crossMean = meanOf(cross);
+      // The most negative cross-region pairing is the one a portfolio is built
+      // on, so it is named rather than left to be found in the grid.
+      var best = cross.slice().sort(function (x, y) { return x.mean_r - y.mean_r; })[0];
+      if (sameMean !== null && crossMean !== null) {
+        document.getElementById("corr-note").innerHTML =
+          "Mean correlation between two wind farms&rsquo; five-minute capacity factors. " +
+          "The diagonal is two farms inside one region; off the diagonal, one in each. " +
+          "Two farms in the same region average <strong>" + num(sameMean, 2) +
+          "</strong>; in different regions <strong>" + num(crossMean, 2) +
+          "</strong> &mdash; crossing a regional boundary removes most of the co-movement. " +
+          (best && best.mean_r < 0
+            ? "<strong>" + esc(best.region_a) + " and " + esc(best.region_b) +
+              "</strong> are the one pairing that is actually negative (" +
+              num(best.mean_r, 2) + ", portfolio " + num(best.portfolio_r, 2) +
+              "): they offset rather than merely differ, which is a hedge and not just " +
+              "diversification."
+            : "") +
+          (corr[0].farms_excluded
+            ? " " + num(corr[0].farms_excluded, 0) + " farm(s) excluded for too little " +
+              "history or no variation."
+            : "");
+      }
+
+      table(document.getElementById("corr-table"),
+        [{ label: "Region A", get: function (r) { return '<span class="dot" style="background:' + colourOf(r.region_a) + '"></span>' + r.region_a; } },
+         { label: "Region B", get: function (r) { return '<span class="dot" style="background:' + colourOf(r.region_b) + '"></span>' + r.region_b; } },
+         { label: "Farm pairs", num: true, get: function (r) { return num(r.farm_pairs, 0); } },
+         { label: "Mean r", num: true, get: function (r) { return num(r.mean_r, 3); } },
+         { label: "Median r", num: true, get: function (r) { return num(r.median_r, 3); } },
+         { label: "Weakest", num: true, get: function (r) { return num(r.min_r, 3); } },
+         { label: "Strongest", num: true, get: function (r) { return num(r.max_r, 3); } },
+         { label: "Portfolio r", num: true, get: function (r) { return r.is_same_region ? "\u2014" : num(r.portfolio_r, 3); } }],
+        corr.filter(function (r) { return r.region_a <= r.region_b; }));
     }
 
     /* ---- quality -------------------------------------------------------- */
