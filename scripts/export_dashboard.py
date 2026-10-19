@@ -50,6 +50,8 @@ SLICES: Final = {
     "farm_cf_week": ("farm_daily",),
     "revenue_region": ("farm_revenue_daily",),
     "capture": ("capture_price",),
+    "cannibalisation": ("cannibalisation",),
+    "revenue_concentration": ("revenue_concentration",),
     "quality": ("quality",),
     "freshness": ("latest_snapshot",),
     "farm_index": ("farm_daily", "farm_revenue_daily"),
@@ -70,6 +72,8 @@ PARAM_TABLE: Final = {
     "farm_daily": "farm_daily",
     "farm_revenue": "farm_revenue_daily",
     "capture": "capture_price",
+    "cannibalisation": "cannibalisation",
+    "revenue_concentration": "revenue_concentration",
     "quality": "quality",
     "snapshot": "latest_snapshot",
 }

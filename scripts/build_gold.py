@@ -45,7 +45,7 @@ class Model:
     """One gold table: a SQL model and the inputs it needs."""
 
     name: str
-    needs: tuple[str, ...]  # wind, price, bronze_scada, registry
+    needs: tuple[str, ...]  # wind, price, bronze_scada, bronze_regionsum, registry
 
 
 MODELS: Final = (
@@ -54,6 +54,10 @@ MODELS: Final = (
     Model("capture_price", ("wind", "price")),
     Model("region_hourly", ("wind",)),
     Model("latest_snapshot", ("wind", "bronze_scada", "registry")),
+    Model("revenue_concentration", ("wind", "price")),
+    # Regional demand is the only input outside silver: penetration needs the
+    # denominator, and silver holds wind units and price, not regional totals.
+    Model("cannibalisation", ("wind", "price", "bronze_regionsum")),
 )
 
 
@@ -70,6 +74,8 @@ def available(silver_dir: Path, bronze_dir: Path, registry: Path) -> set[str]:
         present.add("price")
     if any((bronze_dir / "scada").glob("**/*.parquet")):
         present.add("bronze_scada")
+    if any((bronze_dir / "regionsum").glob("**/*.parquet")):
+        present.add("bronze_regionsum")
     if registry.exists():
         present.add("registry")
     return present
@@ -89,11 +95,23 @@ def build(
         "wind_glob": str(silver_dir / "wind_output" / "*.parquet"),
         "price_glob": str(silver_dir / "price" / "*.parquet"),
         "bronze_glob": str(bronze_dir / "scada" / "**" / "*.parquet"),
+        "regionsum_glob": str(bronze_dir / "regionsum" / "**" / "*.parquet"),
         "registry": str(registry),
     }
 
     written: dict[str, int] = {}
     con = duckdb.connect()
+    # Single-threaded on purpose. Floating-point addition is not associative, so
+    # a parallel sum adds its partials in whatever order the threads finish and
+    # the last bit of an aggregate moves between runs on identical input. Gold
+    # is rewritten and committed every hour, so that alone was entering a new
+    # Parquet blob into git history hourly for no change in the data — measured
+    # at 34 KB a run across capture_price and region_hourly, about 300 MB a
+    # year. Rounding the outputs narrows it but cannot close it: a true value
+    # sitting on a rounding boundary still tips either way. One thread makes the
+    # summation order deterministic, which does close it. Gold is a few hundred
+    # thousand rows, so the whole build costs seconds either way.
+    con.execute("SET threads TO 1")
     try:
         for model in MODELS:
             missing = [need for need in model.needs if need not in present]
