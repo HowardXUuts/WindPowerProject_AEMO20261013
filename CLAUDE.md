@@ -179,6 +179,14 @@ these are not negotiable:
 
 - A feature for interval `t` may use only data whose interval ends at or before
   `t`, with one interval of slack for publication lag — data up to `t − 5 min`.
+  **`t` is the first interval being predicted, not the row key.** A feature row
+  keyed `t` in `sql/ml/features.sql` is a forecast issued at the end of
+  interval `t` and predicting `t+5` onward, so interval `t`'s own price is a
+  feature. Measured, not assumed: across 5,695 rows carrying AEMO's
+  `LASTCHANGED`, a dispatch result is written about 6 seconds after the
+  interval it governs begins and never before, so interval `t`'s price is a
+  fact by the time `t` ends. Stating which `t` is meant matters because both
+  readings are self-consistent and only one of them is implemented.
 - Forecasts are keyed by **issue time, never valid time**. Every forecast row
   carries `issued_at`, and a feature may use it only where `issued_at <= t`.
   Joining on valid time alone hands the model the answer.

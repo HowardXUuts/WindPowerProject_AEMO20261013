@@ -12,6 +12,26 @@
 -- PRECEDING AND CURRENT ROW` therefore spans t-60min .. t inclusive, which is
 -- what a feature may see. Targets use `1 FOLLOWING`, never `CURRENT ROW`.
 --
+-- **What "at or before t" means here, precisely.** A row keyed `t` is a
+-- forecast issued at the *end* of the interval starting at `t`, predicting the
+-- intervals starting `t+5` onward. So the price of interval `t` is a feature,
+-- not a target — the model knows the interval it just finished, and predicts
+-- the ones after it.
+--
+-- That is the only reading the data supports, and it is measured rather than
+-- assumed. Across 5,695 committed rows carrying AEMO's own `LASTCHANGED`, a
+-- dispatch result is written 4.7–5.0 minutes before the interval-ending
+-- settlement stamp it carries — which is about **6 seconds after the interval
+-- it governs begins**, never before. Interval `t`'s price therefore exists
+-- 6 seconds into `t` and is a fact by the time `t` ends; interval `t+5`'s does
+-- not exist until 6 seconds into `t+5`, which is why the first target interval
+-- is `t+5` and not `t`.
+--
+-- It is also the convention AEMO itself uses: a `P5MIN` run named 09:50
+-- forecasts 09:50 onward and is published around 09:45:40, knowing the 09:45
+-- dispatch. Read CLAUDE.md's "data up to t - 5 min" with `t` as the first
+-- *predicted* interval and the two agree exactly.
+--
 -- Parameters: $price_glob, $wind_glob, $registry, $spike_threshold
 
 WITH price AS (
