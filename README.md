@@ -14,20 +14,74 @@ No cloud account, no database server, no paid services.
 
 ## Architecture
 
-```
- Dispatch_SCADA  ─┐                                                   dashboard
-  MW per DUID    │                                                     (Pages)
-                 ├─▶ raw zips ──▶ bronze ──▶ silver ──▶ gold ──▶      │
- DispatchIS      │   transient     write-once   wind only   joined        ▼
-  $/MWh per      ┘   (not kept)    per file     typed &     volume   Q&A assistant
-  region                                         validated   x price  (SQL via LLM)
+```mermaid
+flowchart LR
+  subgraph nemweb["NEMWeb · Reports/Current · ~2 days retention"]
+    direction TB
+    SC["Dispatch_SCADA"]
+    DI["DispatchIS_Reports"]
+    P5["P5_Reports"]
+    PD["PredispatchIS_Reports"]
+  end
+
+  subgraph bronze["bronze · write-once, one file per closed NEM hour"]
+    direction TB
+    B1["scada"]
+    B2["price"]
+    B3["regionsum"]
+    B4["interconnector"]
+    B5["p5min"]
+    B6["predispatch_price<br/>predispatch_region"]
+  end
+
+  subgraph silver["silver · wind only, immutable per trading date"]
+    direction TB
+    S1["wind_output"]
+    S2["price"]
+  end
+
+  GOLD["gold · 13 tables<br/>full rewrite each run<br/>revenue · capture price<br/>cannibalisation · concentration<br/>negative-price runs · correlation<br/>demand shape · quality"]
+
+  DASH["dashboard<br/>GitHub Pages"]
+  QA["Q&A assistant<br/>question to read-only SQL"]
+  ML["ML features<br/>derived, never committed"]
+
+  SC --> B1
+  DI --> B2
+  DI --> B3
+  DI --> B4
+  P5 --> B5
+  PD --> B6
+
+  B1 --> S1
+  B2 --> S2
+  S1 --> GOLD
+  S2 --> GOLD
+  B3 --> GOLD
+
+  GOLD --> DASH
+  GOLD --> QA
+  S1 --> ML
+  S2 --> ML
+  B5 --> ML
 ```
 
-| Layer | What it holds |
-|-------|---------------|
-| **bronze** | Both feeds as published, every DUID and region. One Parquet file per closed NEM hour, never rewritten. |
-| **silver** | Wind only. Interval start and end in UTC and NEM local, deduplicated, quality-flagged. One immutable file per trading date. |
-| **gold** | Aggregates, rewritten in full each run: `farm_daily`, `farm_revenue_daily`, `capture_price`, `region_hourly`, `latest_snapshot`, `quality`. |
+One download can feed several bronze tables: `DispatchIS` carries price,
+regional demand and interconnector flows in one zip, so it is fetched once and
+parsed three ways, each with its own watermark. Forecast sources keep the run
+time AEMO issued them at, because the leakage rule depends on it.
+
+| Layer | What it holds | Committed |
+|-------|---------------|-----------|
+| **raw** | The downloaded `PUBLIC_*.zip` | No — transient |
+| **bronze** | Every DUID and region as published, columns untouched. One Parquet per closed NEM hour, never rewritten. | Yes |
+| **silver** | Wind only. Interval start and end in UTC and NEM local, deduplicated, quality-flagged. One immutable file per trading date. | Yes |
+| **gold** | Aggregates and dashboard-ready tables, rewritten in full each run. | Yes |
+| **features** | The ML feature table, rebuilt from silver on demand. | No — gitignored |
+
+Every column of every table is listed in
+[`DATA_DICTIONARY.md`](DATA_DICTIONARY.md), which is generated from the models
+and the Parquet rather than written by hand.
 
 ## Stack
 
@@ -84,11 +138,12 @@ Locally:
 ```bash
 python3.11 -m venv .venv && source .venv/bin/activate
 pip install '.[dev,reference]'
-pytest -q                                    # 273 tests, no network needed
+pytest -q                                    # full suite, no network needed
 python scripts/export_dashboard.py           # gold + silver -> docs/data/
 python -m http.server 8000 --directory docs  # then open localhost:8000
 
 python assistant/eval.py                     # scores the assistant; no key needed
+python scripts/data_dictionary.py --check     # dictionary matches the models
 python assistant/qa.py "which farms earned the most?"
 ```
 
