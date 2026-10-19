@@ -30,6 +30,7 @@ Approximate assertions would pass against an average taken the wrong way
 round, so these are exact.
 """
 
+import math
 from datetime import date, datetime, timedelta
 
 import duckdb
@@ -719,6 +720,182 @@ def test_the_main_fixtures_single_run_lands_in_the_top_bucket(gold):
     assert sa.iloc[0].pct_of_negative_intervals == pytest.approx(100.0)
     worst = rows(gold, "negative_price_worst", "region, rank")
     assert worst[worst.region == "SA1"].iloc[0].duration_hours == pytest.approx(12.0)
+
+
+# --- output correlation ---------------------------------------------------
+
+# Correlation is the one measure here that cannot be checked by arithmetic on a
+# flat fixture, so this one is built from signals whose correlation is known in
+# advance by construction:
+#
+#   CORRA / CORRB   region COR1, identical sine waves           -> r = +1
+#   CORRC           region COR2, the same wave inverted         -> r = -1 against A and B
+#   CORRD           region COR2, a quarter-period phase shift   -> r = 0 against A (cos vs sin)
+#   CORRFLAT        region COR1, constant output                -> excluded, no variation
+#   CORRSHORT       region COR1, one hour only                  -> excluded, too little history
+#
+# Capacity differs between A and B on purpose: correlation is computed on
+# capacity factor, so a model that correlated raw MW would still return 1 here,
+# but the *regional* aggregate figures would move. The phase pair is what
+# actually pins the maths — +1 and -1 survive almost any mistake, 0 does not.
+
+CORR_DAY = date(2026, 10, 15)
+CORR_PERIOD = 72  # intervals per full cycle: six hours
+
+
+def corr_starts(i):
+    nem_local = datetime(CORR_DAY.year, CORR_DAY.month, CORR_DAY.day) + timedelta(minutes=5 * i)
+    return nem_local.replace(tzinfo=NEM_TZ), nem_local
+
+
+CORR_FARMS = (
+    # duid, name, region, capacity, profile(i) -> MW
+    ("CORRA", "Corr A", "COR1", 100.0,
+     lambda i: 50.0 + 40.0 * math.sin(2 * math.pi * i / CORR_PERIOD)),
+    ("CORRB", "Corr B", "COR1", 200.0,
+     lambda i: 100.0 + 80.0 * math.sin(2 * math.pi * i / CORR_PERIOD)),
+    ("CORRC", "Corr C", "COR2", 100.0,
+     lambda i: 50.0 - 40.0 * math.sin(2 * math.pi * i / CORR_PERIOD)),
+    ("CORRD", "Corr D", "COR2", 100.0,
+     lambda i: 50.0 + 40.0 * math.cos(2 * math.pi * i / CORR_PERIOD)),
+    ("CORRFLAT", "Corr Flat", "COR1", 100.0, lambda i: 50.0),
+)
+
+
+@pytest.fixture
+def corr_gold(tmp_path):
+    """Gold built from signals whose pairwise correlation is known exactly."""
+    silver = tmp_path / "silver"
+    wind = []
+    for duid, name, region, capacity, profile in CORR_FARMS:
+        for i in range(INTERVALS):
+            utc, nem_local = corr_starts(i)
+            wind.append((
+                CORR_DAY, utc, nem_local, utc + timedelta(minutes=5),
+                nem_local + timedelta(minutes=5), duid, name, region, capacity,
+                profile(i), False, False, "f.zip", INTERVALS, True,
+            ))
+    # Seen for only twelve intervals, so below the one-day floor.
+    for i in range(12):
+        utc, nem_local = corr_starts(i)
+        wind.append((
+            CORR_DAY, utc, nem_local, utc + timedelta(minutes=5),
+            nem_local + timedelta(minutes=5), "CORRSHORT", "Corr Short", "COR1", 100.0,
+            float(i), False, False, "f.zip", INTERVALS, True,
+        ))
+
+    _write(WIND_DDL, "wind", wind, silver / "wind_output" / f"date={CORR_DAY}.parquet")
+    registry = tmp_path / "wind_duids.csv"
+    registry.write_text(REGISTRY)
+    build(
+        silver_dir=silver, bronze_dir=tmp_path / "bronze",
+        gold_dir=tmp_path / "gold", registry=registry,
+    )
+    return tmp_path / "gold"
+
+
+def farm_r(gold, a, b):
+    """The stored correlation between two farms, from the per-farm table."""
+    df = rows(gold, "farm_correlation", "duid, relation, rank")
+    match = df[(df.duid == a) & (df.other_duid == b)]
+    assert not match.empty, f"no stored pair {a}-{b}"
+    return float(match.iloc[0].r)
+
+
+def test_identical_shapes_correlate_perfectly(corr_gold):
+    """Different capacities, same shape: capacity factor must give exactly 1."""
+    assert farm_r(corr_gold, "CORRA", "CORRB") == pytest.approx(1.0, abs=5e-5)
+
+
+def test_inverted_shape_correlates_negatively(corr_gold):
+    assert farm_r(corr_gold, "CORRA", "CORRC") == pytest.approx(-1.0, abs=5e-5)
+
+
+def test_a_quarter_period_apart_is_uncorrelated(corr_gold):
+    """The assertion that actually pins the maths.
+
+    +1 and -1 survive most mistakes; a sine against a cosine of the same period
+    integrates to zero and will not come out right by accident.
+    """
+    assert farm_r(corr_gold, "CORRA", "CORRD") == pytest.approx(0.0, abs=1e-3)
+
+
+def test_correlation_is_stored_both_ways(corr_gold):
+    """A page showing one farm should not need to know how the pair was keyed."""
+    assert farm_r(corr_gold, "CORRB", "CORRA") == pytest.approx(
+        farm_r(corr_gold, "CORRA", "CORRB"), abs=5e-5
+    )
+
+
+def test_degenerate_farms_are_excluded_and_counted(corr_gold):
+    """A farm that never varied, and one seen for an hour, are both unusable."""
+    farms = set(rows(corr_gold, "farm_correlation", "duid").duid)
+    assert "CORRFLAT" not in farms      # no variation: correlation undefined
+    assert "CORRSHORT" not in farms     # under a day of intervals
+    assert {"CORRA", "CORRB", "CORRC", "CORRD"} <= farms
+    matrix = rows(corr_gold, "output_correlation", "region_a, region_b")
+    # Both exclusions are reported rather than silently applied.
+    assert int(matrix.iloc[0].farms_excluded) == 2
+
+
+def test_matrix_covers_every_region_pair_in_both_directions(corr_gold):
+    df = rows(corr_gold, "output_correlation", "region_a, region_b")
+    assert set(zip(df.region_a, df.region_b, strict=True)) == {
+        ("COR1", "COR1"), ("COR2", "COR2"), ("COR1", "COR2"), ("COR2", "COR1"),
+    }
+    # The mirrored pair carries the same statistic.
+    cross = df[df.region_a != df.region_b]
+    assert cross.mean_r.nunique() == 1
+
+
+def test_matrix_means_match_the_pairs_behind_them(corr_gold):
+    df = rows(corr_gold, "output_correlation", "region_a, region_b").set_index(
+        ["region_a", "region_b"]
+    )
+    # COR1 holds exactly one usable pair, A-B, which is +1.
+    assert df.loc[("COR1", "COR1"), "farm_pairs"] == 1
+    assert df.loc[("COR1", "COR1"), "mean_r"] == pytest.approx(1.0, abs=5e-5)
+    # COR2 holds C-D: an inverted sine against a cosine, so also zero.
+    assert df.loc[("COR2", "COR2"), "farm_pairs"] == 1
+    assert df.loc[("COR2", "COR2"), "mean_r"] == pytest.approx(0.0, abs=1e-3)
+    # Across the two regions: A-C, A-D, B-C, B-D = -1, 0, -1, 0 -> mean -0.5.
+    assert df.loc[("COR1", "COR2"), "farm_pairs"] == 4
+    assert df.loc[("COR1", "COR2"), "mean_r"] == pytest.approx(-0.5, abs=1e-3)
+    assert df.loc[("COR1", "COR2"), "min_r"] == pytest.approx(-1.0, abs=5e-5)
+    assert df.loc[("COR1", "COR2"), "max_r"] == pytest.approx(0.0, abs=1e-3)
+
+
+def test_portfolio_correlation_is_the_aggregate_not_the_mean_pair(corr_gold):
+    """The two columns are different statistics and must not be conflated.
+
+    COR1's aggregate is A+B, a pure sine. COR2's is C+D, an inverted sine plus a
+    cosine, which sums to another sinusoid of the same period shifted between
+    the two — so the aggregates correlate at -1/sqrt(2) while the mean farm pair
+    is -0.5. Equal values here would mean one column was computed twice.
+    """
+    df = rows(corr_gold, "output_correlation", "region_a, region_b").set_index(
+        ["region_a", "region_b"]
+    )
+    assert df.loc[("COR1", "COR2"), "portfolio_r"] == pytest.approx(
+        -1 / math.sqrt(2), abs=1e-3
+    )
+    assert df.loc[("COR1", "COR1"), "portfolio_r"] == pytest.approx(1.0, abs=5e-5)
+
+
+def test_each_farm_keeps_five_of_each_tail_at_most(corr_gold):
+    df = rows(corr_gold, "farm_correlation", "duid, relation, rank")
+    for _duid, group in df.groupby("duid"):
+        for relation in ("most", "least"):
+            picked = group[group.relation == relation]
+            # Only three counterparts exist in this fixture, so three is correct;
+            # the cap matters on the real fleet of 96.
+            assert len(picked) == 3
+            assert list(picked["rank"]) == [1, 2, 3]
+    # Most-correlated is ordered downward, least upward.
+    a_most = df[(df.duid == "CORRA") & (df.relation == "most")].sort_values("rank")
+    assert list(a_most.r) == sorted(a_most.r, reverse=True)
+    a_least = df[(df.duid == "CORRA") & (df.relation == "least")].sort_values("rank")
+    assert list(a_least.r) == sorted(a_least.r)
 
 
 # --- the runner -----------------------------------------------------------

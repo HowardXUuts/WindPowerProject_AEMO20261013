@@ -54,6 +54,7 @@ SLICES: Final = {
     "revenue_concentration": ("revenue_concentration",),
     "negative_runs": ("negative_price_runs",),
     "negative_worst": ("negative_price_worst",),
+    "correlation": ("output_correlation",),
     "quality": ("quality",),
     "freshness": ("latest_snapshot",),
     "farm_index": ("farm_daily", "farm_revenue_daily"),
@@ -66,6 +67,7 @@ FARM_DETAIL: Final = {
     "daily": ("farm_daily", "farm_revenue_daily", "capture_price"),
     "profile": ("silver",),
     "shape": ("silver",),
+    "correlation": ("farm_correlation",),
 }
 
 # SQL parameter name -> gold table file stem
@@ -78,6 +80,8 @@ PARAM_TABLE: Final = {
     "revenue_concentration": "revenue_concentration",
     "negative_price_runs": "negative_price_runs",
     "negative_price_worst": "negative_price_worst",
+    "output_correlation": "output_correlation",
+    "farm_correlation": "farm_correlation",
     "quality": "quality",
     "snapshot": "latest_snapshot",
 }

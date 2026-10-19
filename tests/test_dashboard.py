@@ -225,10 +225,15 @@ def test_a_file_is_written_for_every_farm_in_the_index(built_gold, silver, tmp_p
 
 def test_farm_file_carries_every_section_the_page_reads(built_gold, silver, tmp_path):
     detail = farm_file(run_full(built_gold, silver, tmp_path), "WFA1")
-    assert set(detail) == {"farm", "daily", "profile", "shape"}
+    assert set(detail) == {"farm", "daily", "profile", "shape", "correlation"}
     assert detail["farm"]["duid"] == "WFA1"
     assert len(detail["profile"]) == 288, "a complete day is 288 five-minute intervals"
     assert len(detail["shape"]) == 24, "the merchant profile is one point per hour"
+    # Present but empty, and correctly so: WFA1 generates a flat 50 MW all day,
+    # which has no variation to correlate, so output_correlation excludes it and
+    # no pair survives. The section is still keyed, because the page reads every
+    # section by name — and this is the exclusion rule showing up end to end.
+    assert detail["correlation"] == []
 
 
 def test_profile_pairs_output_with_the_price_of_the_same_interval(built_gold, silver, tmp_path):

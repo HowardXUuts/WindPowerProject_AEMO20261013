@@ -21,6 +21,14 @@
     --good: #0ca30c;
     --warning: #fab219;
     --critical: #d03b3b;
+    /* Diverging pair for the correlation matrix: blue and red poles with a
+       neutral grey midpoint, so zero reads as nothing. Not the status colours
+       and not two cool hues — a midpoint with a hue of its own would make the
+       sign ambiguous. Blue is the negative pole because for a portfolio a
+       negative correlation is the desirable end. */
+    --corr-neg: #2a78d6;
+    --corr-pos: #e34948;
+    --corr-zero: #f0efec;
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
@@ -38,6 +46,9 @@
       --series-3: #199e70;
       --series-4: #c98500;
       --series-5: #d55181;
+      --corr-neg: #3987e5;
+      --corr-pos: #e66767;
+      --corr-zero: #383835;
     }
   }
   :root[data-theme="dark"] {
@@ -55,6 +66,9 @@
     --series-3: #199e70;
     --series-4: #c98500;
     --series-5: #d55181;
+    --corr-neg: #3987e5;
+    --corr-pos: #e66767;
+    --corr-zero: #383835;
   }
 
   * { box-sizing: border-box; }
@@ -107,6 +121,23 @@
      five-minute profile is 288 rows, and the no-CDN fallback opens every table
      at once. Without a ceiling that is a 29,000px page. */
   .tablewrap { overflow: auto; margin-top: 12px; max-height: 60vh; }
+
+  /* Correlation matrix. The fill is capped at 60% toward either pole because
+     that is where white-on-dark text stops clearing 4.5:1 (measured: 4.67:1 for
+     the red pole in dark mode, 4.07:1 at 70%). Every cell also prints its
+     number, so the colour is a second encoding and never the only one. */
+  table.matrix td.cell {
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+    border: 2px solid var(--surface-1);
+    min-width: 62px;
+  }
+  table.matrix td.diag { font-weight: 600; }
+  table.matrix th.rowhead { text-align: left; white-space: nowrap; }
+  .scale { display: flex; align-items: center; gap: 8px; margin-top: 12px;
+           font-size: 0.78rem; color: var(--text-secondary); flex-wrap: wrap; }
+  .scale .swatches { display: flex; }
+  .scale .swatches span { width: 22px; height: 12px; display: block; }
   table { border-collapse: collapse; width: 100%; font-size: 0.8rem; }
   th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
   th { color: var(--text-muted); font-weight: 600; text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.04em; }
@@ -121,6 +152,10 @@
   .status-skip { color: var(--text-muted); }
 
   .two { display: grid; gap: 16px; grid-template-columns: 1fr; }
+  /* Grid items default to min-width:auto, so a track refuses to shrink below
+     its content's min-content width — a table inside one pushes the whole page
+     wider instead of scrolling inside its own .tablewrap. */
+  .two > * { min-width: 0; }
   @media (min-width: 760px) { .two { grid-template-columns: 1fr 1fr; } }
 
   footer { margin-top: 32px; font-size: 0.8rem; color: var(--text-muted); }

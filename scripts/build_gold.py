@@ -60,6 +60,8 @@ MODELS: Final = (
     Model("cannibalisation", ("wind", "price", "bronze_regionsum")),
     Model("negative_price_runs", ("wind", "price")),
     Model("negative_price_worst", ("wind", "price")),
+    Model("output_correlation", ("wind",)),
+    Model("farm_correlation", ("wind",)),
 )
 
 
