@@ -58,6 +58,8 @@ MODELS: Final = (
     # Regional demand is the only input outside silver: penetration needs the
     # denominator, and silver holds wind units and price, not regional totals.
     Model("cannibalisation", ("wind", "price", "bronze_regionsum")),
+    Model("negative_price_runs", ("wind", "price")),
+    Model("negative_price_worst", ("wind", "price")),
 )
 
 

@@ -526,6 +526,201 @@ def test_concentration_ranks_by_revenue_not_price(gold):
     )
 
 
+# --- negative-price runs --------------------------------------------------
+
+# A second fixture, because the main one yields a single 144-interval run and
+# says nothing about where one run ends and the next begins. This one is built
+# so every boundary case is hand-checkable:
+#
+#   RUN1   interval 0        negative           -> 1 run  of 1   (bucket 1)
+#          intervals 2-4     negative           -> 1 run  of 3   (bucket 2)
+#          intervals 6-11    negative           -> 1 run  of 6   (bucket 3)
+#          intervals 20,21   negative   ]  interval 22 is ABSENT from the data,
+#          intervals 23,24   negative   ]  so these are two runs of 2, not one
+#                                          run of 4
+#   OPEN1  final 3 intervals negative           -> a run still in progress
+#
+#   RUN1 negative intervals  1 + 3 + 6 + 2 + 2            = 14
+#   RUN1 runs                1 + 1 + 1 + 1 + 1            = 5
+#   bucket 2 holds the 3 and both 2s                      = 3 runs, 7 intervals
+#
+# Wind is a flat 10 MW and the negative price a flat -$50, so energy is
+# 10/12 MWh an interval and revenue follows the interval count exactly.
+
+RUN_DAY = date(2026, 10, 14)
+RUN_WIND_MW = 10.0
+RUN_NEG_RRP = -50.0
+RUN_POS_RRP = 100.0
+RUN_NEGATIVE = {0, 2, 3, 4, 6, 7, 8, 9, 10, 11, 20, 21, 23, 24}
+RUN_ABSENT = 22  # dropped entirely, to prove a gap breaks a run
+
+
+def run_starts(i):
+    nem_local = datetime(RUN_DAY.year, RUN_DAY.month, RUN_DAY.day) + timedelta(minutes=5 * i)
+    return nem_local.replace(tzinfo=NEM_TZ), nem_local
+
+
+@pytest.fixture
+def runs_gold(tmp_path):
+    """Gold built from the run-boundary fixture above."""
+    silver = tmp_path / "silver"
+    wind, price = [], []
+
+    for i in range(INTERVALS):
+        if i == RUN_ABSENT:
+            continue
+        utc, nem_local = run_starts(i)
+        rrp = RUN_NEG_RRP if i in RUN_NEGATIVE else RUN_POS_RRP
+        wind.append((
+            RUN_DAY, utc, nem_local, utc + timedelta(minutes=5), nem_local + timedelta(minutes=5),
+            "WFR1", "Run Wind Farm", "RUN1", 50.0, RUN_WIND_MW, False, False,
+            "f.zip", INTERVALS, True,
+        ))
+        price.append((
+            RUN_DAY, utc, nem_local, utc + timedelta(minutes=5), nem_local + timedelta(minutes=5),
+            "RUN1", rrp, rrp < 0, 0, 0, 0, "p.zip", INTERVALS, True,
+        ))
+
+    # A region whose last interval is negative, so one run is left open.
+    for i in range(INTERVALS):
+        utc, nem_local = run_starts(i)
+        rrp = RUN_NEG_RRP if i >= INTERVALS - 3 else RUN_POS_RRP
+        wind.append((
+            RUN_DAY, utc, nem_local, utc + timedelta(minutes=5), nem_local + timedelta(minutes=5),
+            "WFO1", "Open Wind Farm", "OPEN1", 50.0, RUN_WIND_MW, False, False,
+            "f.zip", INTERVALS, True,
+        ))
+        price.append((
+            RUN_DAY, utc, nem_local, utc + timedelta(minutes=5), nem_local + timedelta(minutes=5),
+            "OPEN1", rrp, rrp < 0, 0, 0, 0, "p.zip", INTERVALS, True,
+        ))
+
+    _write(WIND_DDL, "wind", wind, silver / "wind_output" / f"date={RUN_DAY}.parquet")
+    _write(PRICE_DDL, "price", price, silver / "price" / f"date={RUN_DAY}.parquet")
+    registry = tmp_path / "wind_duids.csv"
+    registry.write_text(REGISTRY)
+    build(
+        silver_dir=silver, bronze_dir=tmp_path / "bronze",
+        gold_dir=tmp_path / "gold", registry=registry,
+    )
+    return tmp_path / "gold"
+
+
+def test_a_missing_interval_breaks_a_run(runs_gold):
+    """The point of islanding on a time sequence rather than on row order.
+
+    Intervals 20, 21, 23 and 24 are negative and 22 is absent from the data.
+    Islanded by row order these weld into one run of four; islanded by the
+    five-minute sequence they stay two runs of two, which is what the data
+    actually supports.
+    """
+    df = rows(runs_gold, "negative_price_runs", "region, bucket")
+    df = df[df.region == "RUN1"].set_index("bucket")
+    assert df.loc[2, "runs"] == 3          # the 3, and both 2s
+    assert df.loc[2, "intervals"] == 7     # 3 + 2 + 2
+    assert 3 not in df.index or df.loc[3, "runs"] == 1
+    assert df.loc[3, "intervals"] == 6     # the 4-6 bucket holds only the six
+    assert int(df.runs.sum()) == 5
+    assert int(df.intervals.sum()) == 14
+
+
+def test_run_buckets_are_assigned_by_length(runs_gold):
+    df = rows(runs_gold, "negative_price_runs", "region, bucket")
+    df = df[df.region == "RUN1"].set_index("bucket")
+    assert list(df.index) == [1, 2, 3]
+    assert list(df.bucket_label) == ["5 min", "10-15 min", "20-30 min"]
+    assert df.loc[1, "runs"] == 1 and df.loc[1, "intervals"] == 1
+
+
+def test_run_shares_are_exact(runs_gold):
+    df = rows(runs_gold, "negative_price_runs", "region, bucket")
+    df = df[df.region == "RUN1"].set_index("bucket")
+    # 1, 7 and 6 of 14 negative intervals; 1, 3 and 1 of 5 runs.
+    assert df.loc[1, "pct_of_negative_intervals"] == pytest.approx(100 / 14, abs=5e-5)
+    assert df.loc[2, "pct_of_negative_intervals"] == pytest.approx(50.0, abs=5e-5)
+    assert df.loc[3, "pct_of_negative_intervals"] == pytest.approx(600 / 14, abs=5e-5)
+    assert df.loc[2, "pct_of_runs"] == pytest.approx(60.0, abs=5e-5)
+    assert df.loc[1, "pct_of_runs"] == pytest.approx(20.0, abs=5e-5)
+    # The contrast the whole measure exists for: 60% of the runs, 50% of the
+    # time; 20% of the runs, 43% of the time.
+    assert df.loc[3, "pct_of_runs"] < df.loc[3, "pct_of_negative_intervals"]
+
+
+def test_run_lengths_are_reported_in_minutes(runs_gold):
+    df = rows(runs_gold, "negative_price_runs", "region, bucket")
+    df = df[df.region == "RUN1"].set_index("bucket")
+    # Bucket 2 holds runs of 3, 2 and 2 intervals: median 2 -> 10 minutes,
+    # longest 3 -> 15 minutes.
+    assert df.loc[2, "median_run_minutes"] == pytest.approx(10.0)
+    assert df.loc[2, "longest_run_minutes"] == 15
+    assert df.loc[3, "longest_run_minutes"] == 30
+
+
+def test_run_energy_and_revenue_are_exact(runs_gold):
+    df = rows(runs_gold, "negative_price_runs", "region, bucket")
+    df = df[df.region == "RUN1"].set_index("bucket")
+    per_interval = RUN_WIND_MW * 5.0 / 60.0  # 0.8333 MWh
+    assert df.loc[2, "wind_energy_mwh"] == pytest.approx(7 * per_interval, abs=5e-4)
+    assert df.loc[3, "wind_energy_mwh"] == pytest.approx(6 * per_interval, abs=5e-4)
+    assert df.loc[3, "revenue_aud"] == pytest.approx(6 * per_interval * RUN_NEG_RRP, abs=5e-3)
+    assert df.loc[1, "deepest_rrp"] == pytest.approx(RUN_NEG_RRP)
+    # Wind is flat, so the energy share must equal the interval share. A
+    # weighting mistake would separate them.
+    for bucket in (1, 2, 3):
+        assert df.loc[bucket, "pct_of_negative_energy"] == pytest.approx(
+            df.loc[bucket, "pct_of_negative_intervals"], abs=5e-4
+        )
+
+
+def test_worst_runs_are_ranked_longest_first(runs_gold):
+    df = rows(runs_gold, "negative_price_worst", "region, rank")
+    run1 = df[df.region == "RUN1"]
+    assert list(run1["rank"]) == [1, 2, 3, 4, 5]
+    assert list(run1.intervals) == [6, 3, 2, 2, 1]
+    assert run1.iloc[0].duration_hours == pytest.approx(0.5)
+
+
+def test_worst_run_window_is_the_interval_it_covers(runs_gold):
+    """A run ends when its last interval ends, not when that interval starts."""
+    df = rows(runs_gold, "negative_price_worst", "region, rank")
+    longest = df[df.region == "RUN1"].iloc[0]
+    # Intervals 6..11 on the fixture day: 00:30 through to the end of 00:55.
+    assert str(longest.started_nem) == "2026-10-14 00:30:00"
+    assert str(longest.ended_nem) == "2026-10-14 01:00:00"
+
+
+def test_an_unfinished_run_is_flagged_not_hidden(runs_gold):
+    """Its duration is a floor, so ranking it silently would overstate nothing
+    but understate it — the flag is what lets a reader tell."""
+    df = rows(runs_gold, "negative_price_worst", "region, rank")
+    assert not df[df.region == "RUN1"].is_open.any()
+    open_region = df[df.region == "OPEN1"]
+    assert len(open_region) == 1
+    assert bool(open_region.iloc[0].is_open) is True
+    assert open_region.iloc[0].intervals == 3
+
+
+def test_a_region_that_never_goes_negative_has_no_rows(gold):
+    """VIC1 holds a flat $40 all day, so it must be absent rather than zeroed."""
+    df = rows(gold, "negative_price_runs", "region, bucket")
+    assert "VIC1" not in set(df.region)
+    assert "SA1" in set(df.region)
+
+
+def test_the_main_fixtures_single_run_lands_in_the_top_bucket(gold):
+    """SA1 is negative for 144 consecutive intervals: one run of twelve hours."""
+    df = rows(gold, "negative_price_runs", "region, bucket")
+    sa = df[df.region == "SA1"]
+    assert len(sa) == 1
+    assert sa.iloc[0].bucket == 8
+    assert sa.iloc[0].bucket_label == ">8 h"
+    assert sa.iloc[0].runs == 1
+    assert sa.iloc[0].intervals == HALF
+    assert sa.iloc[0].pct_of_negative_intervals == pytest.approx(100.0)
+    worst = rows(gold, "negative_price_worst", "region, rank")
+    assert worst[worst.region == "SA1"].iloc[0].duration_hours == pytest.approx(12.0)
+
+
 # --- the runner -----------------------------------------------------------
 
 
