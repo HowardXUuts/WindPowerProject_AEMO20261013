@@ -218,6 +218,30 @@
   <section class="panel">
     <div class="panel-head">
       <div>
+        <h2>Does the wind arrive when demand does?</h2>
+        <p class="note" id="shape-note">Wind output as a share of operational demand,
+           by hour of the NEM day, averaged over every day held.</p>
+      </div>
+      <button class="toggle" data-target="shape-table-panel" aria-pressed="false">Table</button>
+    </div>
+    <div class="chart"><canvas id="shape-chart"></canvas></div>
+  </section>
+
+  <section class="panel" id="shape-table-panel" hidden>
+    <div class="panel-head">
+      <div>
+        <h2>Shape detail</h2>
+        <p class="note">The ratio and the two means behind it. Demand is operational,
+           so it is already net of rooftop solar &mdash; the middle of the day looks
+           smaller here than a gross demand curve would.</p>
+      </div>
+    </div>
+    <div class="tablewrap" id="shape-table"></div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <div>
         <h2>Revenue and capture detail</h2>
         <p class="note">Capture price is what wind earned per MWh; TWAP is what an even
            generator would have earned. Below 1.0 is the cannibalisation effect.</p>
@@ -279,7 +303,7 @@
     // so without this the whole dashboard goes blank over an optional panel.
     optional("cannibalisation"), optional("revenue_concentration"),
     optional("negative_runs"), optional("negative_worst"),
-    optional("correlation")
+    optional("correlation"), optional("demand_shape")
   ]).then(function (all) {
     var fresh = all[0][0] || {};
     var today = all[1], cf = all[2], farms = all[3];
@@ -288,6 +312,7 @@
     var cannib = all[9] || [], conc = all[10] || [];
     var negRuns = all[11] || [], negWorst = all[12] || [];
     var corr = all[13] || [];
+    var shape = all[14] || [];
 
     // Installed capacity per region, taken from the farm index so revenue can
     // be shown per MW. Absolute revenue only says which region is biggest.
@@ -1020,6 +1045,97 @@
          { label: "Strongest", num: true, get: function (r) { return num(r.max_r, 3); } },
          { label: "Portfolio r", num: true, get: function (r) { return r.is_same_region ? "\u2014" : num(r.portfolio_r, 3); } }],
         corr.filter(function (r) { return r.region_a <= r.region_b; }));
+    }
+
+    /* ---- wind against demand, by hour ----------------------------------- */
+    if (!shape.length) {
+      dropPanel("shape-chart");
+      dropPanel("shape-table");
+    }
+
+    if (shape.length) {
+      var hours = Array.from(new Set(shape.map(function (r) { return r.hour_nem; })))
+                       .sort(function (a, b) { return a - b; });
+      var shapeBy = {};
+      shape.forEach(function (r) { (shapeBy[r.region] = shapeBy[r.region] || {})[r.hour_nem] = r; });
+      var shapeRegions = Object.keys(shapeBy).sort();
+
+      plot("shape-chart", {
+        type: "line",
+        data: {
+          labels: hours.map(function (h) { return (h < 10 ? "0" : "") + h + ":00"; }),
+          datasets: shapeRegions.map(function (region) {
+            return {
+              label: region,
+              region: region,
+              data: hours.map(function (h) {
+                var row = shapeBy[region][h];
+                return row ? row.penetration_pct : null;
+              }),
+              borderColor: colourOf(region), backgroundColor: colourOf(region),
+              borderWidth: 2, pointRadius: 3, pointHoverRadius: 6, tension: 0.3, spanGaps: true
+            };
+          })
+        },
+        options: {
+          interaction: { mode: "index", intersect: false },
+          plugins: {
+            legend: legendBlock,
+            tooltip: {
+              callbacks: {
+                label: function (c) {
+                  var row = (shapeBy[c.dataset.region] || {})[hours[c.dataIndex]];
+                  if (!row) return null;
+                  return c.dataset.region + ": " + num(row.penetration_pct, 1) + "% \u00b7 " +
+                         num(row.mean_wind_mw, 0) + " MW of " +
+                         num(row.mean_demand_mw, 0) + " MW demand";
+                }
+              }
+            }
+          },
+          scales: {
+            x: axis({ title: { display: true, text: "hour of the NEM day", color: css("--text-muted") } }),
+            y: axis({ beginAtZero: true,
+                      title: { display: true, text: "wind % of operational demand", color: css("--text-muted") } })
+          }
+        }
+      });
+
+      // Named from the data: which region swings hardest between its best and
+      // worst hour, and whether its best hour is in the demand peak or away
+      // from it. The answer will change as the record lengthens.
+      var swing = shapeRegions.map(function (region) {
+        var rows = hours.map(function (h) { return shapeBy[region][h]; }).filter(Boolean);
+        if (!rows.length) return null;
+        var top = rows.reduce(function (a, b) { return b.penetration_pct > a.penetration_pct ? b : a; });
+        var bot = rows.reduce(function (a, b) { return b.penetration_pct < a.penetration_pct ? b : a; });
+        return { region: region, top: top, bot: bot,
+                 range: top.penetration_pct - bot.penetration_pct };
+      }).filter(Boolean).sort(function (a, b) { return b.range - a.range; });
+
+      var hh = function (h) { return (h < 10 ? "0" : "") + h + ":00"; };
+      if (swing.length) {
+        var w = swing[0];
+        var days = (shapeBy[w.region][w.top.hour_nem] || {}).days;
+        document.getElementById("shape-note").innerHTML =
+          "Wind output as a share of operational demand, by hour of the NEM day, averaged " +
+          "over every day held. <strong>" + esc(w.region) + "</strong> swings hardest: " +
+          "<strong>" + num(w.top.penetration_pct, 1) + "% at " + hh(w.top.hour_nem) +
+          "</strong> against " + num(w.bot.penetration_pct, 1) + "% at " + hh(w.bot.hour_nem) +
+          ". Where the high hours sit overnight and the low ones in the afternoon run-up " +
+          "to the evening peak, wind is most abundant in the hours demand and price are " +
+          "lowest &mdash; the structural reason behind the capture discount above. " +
+          "Only " + num(days, 0) + " days of record, so read the shape and not the decimals.";
+      }
+
+      table(document.getElementById("shape-table"),
+        [{ label: "Region", get: function (r) { return '<span class="dot" style="background:' + colourOf(r.region) + '"></span>' + r.region; } },
+         { label: "Hour (NEM)", get: function (r) { return hh(r.hour_nem); } },
+         { label: "Wind MW", num: true, get: function (r) { return num(r.mean_wind_mw, 0); } },
+         { label: "Demand MW", num: true, get: function (r) { return num(r.mean_demand_mw, 0); } },
+         { label: "Wind % of demand", num: true, get: function (r) { return num(r.penetration_pct, 1) + "%"; } },
+         { label: "Days", num: true, get: function (r) { return num(r.days, 0); } }],
+        shape);
     }
 
     /* ---- quality -------------------------------------------------------- */

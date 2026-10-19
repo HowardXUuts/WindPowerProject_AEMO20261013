@@ -898,6 +898,71 @@ def test_each_farm_keeps_five_of_each_tail_at_most(corr_gold):
     assert list(a_least.r) == sorted(a_least.r)
 
 
+# --- demand shape ---------------------------------------------------------
+
+# The main fixture already supplies both halves: SA1 wind is 80 MW for the
+# first twelve NEM hours and 20 MW for the second, and regionsum_rows() holds a
+# flat 200 MW of demand all day. So the penetration shape is known exactly:
+#
+#   hours 00-11   80 / 200  = 40%
+#   hours 12-23   20 / 200  = 10%
+#   VIC1          25 / 100  = 25%, every hour
+#
+# Flat demand is the point: it isolates the numerator, so a bug in the hour
+# bucketing or in the interval-ending shift shows up as a step in the wrong
+# place rather than as a plausible curve.
+
+
+def test_demand_shape_covers_every_hour_of_every_region(gold):
+    df = rows(gold, "demand_shape", "region, hour_nem")
+    assert len(df) == 48, "two regions x 24 NEM hours"
+    assert sorted(df[df.region == "SA1"].hour_nem) == list(range(24))
+
+
+def test_penetration_is_exact_per_hour(gold):
+    df = rows(gold, "demand_shape", "region, hour_nem").set_index(["region", "hour_nem"])
+    for hour in range(12):
+        assert df.loc[("SA1", hour), "penetration_pct"] == pytest.approx(40.0, abs=5e-4)
+    for hour in range(12, 24):
+        assert df.loc[("SA1", hour), "penetration_pct"] == pytest.approx(10.0, abs=5e-4)
+    for hour in range(24):
+        assert df.loc[("VIC1", hour), "penetration_pct"] == pytest.approx(25.0, abs=5e-4)
+
+
+def test_the_step_lands_on_the_right_hour(gold):
+    """The fixture changes output exactly at NEM noon.
+
+    An off-by-one in the interval-ending shift, or bucketing on UTC instead of
+    NEM time, moves this boundary — which a smooth real-world curve would hide
+    but a step cannot.
+    """
+    df = rows(gold, "demand_shape", "region, hour_nem").set_index(["region", "hour_nem"])
+    assert df.loc[("SA1", 11), "penetration_pct"] == pytest.approx(40.0, abs=5e-4)
+    assert df.loc[("SA1", 12), "penetration_pct"] == pytest.approx(10.0, abs=5e-4)
+
+
+def test_shape_keeps_the_two_means_behind_the_ratio(gold):
+    df = rows(gold, "demand_shape", "region, hour_nem").set_index(["region", "hour_nem"])
+    assert df.loc[("SA1", 0), "mean_wind_mw"] == pytest.approx(80.0, abs=5e-4)
+    assert df.loc[("SA1", 0), "mean_demand_mw"] == pytest.approx(200.0, abs=5e-4)
+    assert df.loc[("SA1", 0), "intervals"] == 12, "twelve five-minute intervals an hour"
+    assert df.loc[("SA1", 0), "days"] == 1
+
+
+def test_shape_is_skipped_without_regional_demand(tmp_path):
+    """No demand, no denominator — absent rather than a wind-only shape."""
+    silver = tmp_path / "silver"
+    _write(WIND_DDL, "wind", wind_rows(), silver / "wind_output" / f"date={DAY}.parquet")
+    registry = tmp_path / "wind_duids.csv"
+    registry.write_text(REGISTRY)
+    written = build(
+        silver_dir=silver, bronze_dir=tmp_path / "bronze",
+        gold_dir=tmp_path / "gold", registry=registry,
+    )
+    assert "demand_shape" not in written
+    assert not (tmp_path / "gold" / "demand_shape.parquet").exists()
+
+
 # --- the runner -----------------------------------------------------------
 
 
