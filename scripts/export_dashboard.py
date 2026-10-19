@@ -52,6 +52,8 @@ SLICES: Final = {
     "capture": ("capture_price",),
     "cannibalisation": ("cannibalisation",),
     "revenue_concentration": ("revenue_concentration",),
+    "negative_runs": ("negative_price_runs",),
+    "negative_worst": ("negative_price_worst",),
     "quality": ("quality",),
     "freshness": ("latest_snapshot",),
     "farm_index": ("farm_daily", "farm_revenue_daily"),
@@ -74,6 +76,8 @@ PARAM_TABLE: Final = {
     "capture": "capture_price",
     "cannibalisation": "cannibalisation",
     "revenue_concentration": "revenue_concentration",
+    "negative_price_runs": "negative_price_runs",
+    "negative_price_worst": "negative_price_worst",
     "quality": "quality",
     "snapshot": "latest_snapshot",
 }
