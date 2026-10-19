@@ -62,6 +62,7 @@ MODELS: Final = (
     Model("negative_price_worst", ("wind", "price")),
     Model("output_correlation", ("wind",)),
     Model("farm_correlation", ("wind",)),
+    Model("demand_shape", ("wind", "bronze_regionsum")),
 )
 
 
