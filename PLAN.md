@@ -757,3 +757,93 @@ thing to try and the thing to fall back to if boosting does not clearly beat it.
 These are large wheels — scikit-learn alone is tens of megabytes — which is
 precisely why the hourly ingest must keep installing plain `.` and never see
 them.
+
+## 5. Curtailment: the open piece, and why it is open
+
+The one metric from the dashboard review that is not built. It is not built
+because publishing it would have meant publishing a number that cannot be
+defended, and the reason is worth writing down rather than rediscovering.
+
+### Why it matters
+
+A developer looking at a wind farm wants to separate three things that all look
+identical in SCADA output:
+
+- the wind did not blow,
+- the wind blew and the farm was told to back off because the price had gone
+  negative (**economic** curtailment — the operator's own choice, and a
+  decision a battery or a different offtake structure can change),
+- the wind blew and AEMO capped the farm for a network or system constraint
+  (**network** curtailment — not the operator's choice, and a material risk
+  that a capacity factor hides entirely).
+
+Capacity factor cannot tell them apart. Nothing currently on the dashboard can.
+
+### What already exists
+
+Everything needed is ingested:
+
+| Piece | Where |
+|---|---|
+| Actual output per farm, 5-minute | `data/silver/wind_output/` |
+| AEMO's unconstrained wind availability per region | `ss_wind_uigf` in `data/bronze/regionsum/` |
+| Regional price, to split economic from network | `data/silver/price/` |
+
+### The blocker, measured
+
+Comparing regional wind SCADA against `SS_WIND_UIGF` looks like it gives
+curtailment directly. It does not, because the two cover **different
+populations**: `SS_WIND_UIGF` is the availability forecast for
+**semi-scheduled** units only, while the registry in
+`data/reference/wind_duids.csv` includes older scheduled and non-scheduled
+farms as well.
+
+Measured over the record as it stood:
+
+```
+region  avg actual  avg UIGF   apparent shortfall
+VIC1      1374 MW    1533 MW        13.9%
+SA1        730 MW     818 MW        11.7%
+TAS1       166 MW     102 MW        actual ABOVE forecast availability
+```
+
+TAS is the proof. Actual output cannot exceed the availability forecast for the
+same units, so the populations plainly differ — Tasmania's older farms are not
+semi-scheduled and are therefore absent from the UIGF while present in the
+SCADA sum. VIC and SA may well be showing real curtailment, but the figure
+cannot be separated from the population mismatch until the registry is fixed.
+
+### The fix, in order
+
+1. **Persist the dispatch type.** `scripts/refresh_reference.py` already parses
+   a `dispatch_type` column from the AEMO registry spreadsheet — see the
+   `COLUMN_HINTS` entry for it, which exists because `is_generation()` needs it
+   — but it is not written out. `wind_duids.csv` currently carries only
+   `duid, station_name, region, fuel_type, capacity_mw, in_scada`. Add
+   `dispatch_type` to the written columns. This is the whole of the registry
+   work and it is small.
+2. **Filter the comparison** to semi-scheduled DUIDs only, on both sides, then
+   re-measure the three regions above. Expect TAS to stop being impossible.
+3. **Then** build the metric: `greatest(uigf - actual, 0)` per region per
+   interval, split by the price in that interval — negative or near-zero price
+   means economic, a price above zero with output held down means the
+   constraint was not the operator's choice.
+
+### Two traps to carry into step 3
+
+- **UIGF is a forecast, not a measurement.** Small positive differences are
+  forecast error, not curtailment. The metric needs a tolerance — a percentage
+  of availability, not an absolute MW — and the tolerance has to be stated on
+  the chart, because the result moves with it.
+- **The registry is a slowly changing dimension** (CLAUDE.md, leakage rules).
+  Using today's dispatch types and capacities for older intervals will
+  misattribute curtailment at farms that were later expanded or reclassified.
+  For the dashboard this is tolerable if said out loud; for anything feeding
+  the ML phase it is not.
+
+### Sizing
+
+One gold model at (region, trading_date) or (region, hour) grain, a few KB a
+day, plus one dashboard panel. The registry change is a column. The work is
+mostly in step 2 — confirming the populations now match — rather than in the
+SQL.
