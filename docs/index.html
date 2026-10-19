@@ -99,6 +99,59 @@
     <div class="tablewrap" id="ratio-table" hidden></div>
   </section>
 
+  <div class="two">
+    <section class="panel">
+      <div class="panel-head">
+        <div>
+          <h2>What wind earns as wind penetration rises</h2>
+          <p class="note">Output-weighted price in each band of wind as a share of
+             operational demand. <strong>Read it against the solar chart.</strong>
+             The lowest wind band is not the cheapest wind band &mdash; it is the middle
+             of the day, when solar sets the price. Compare bands of similar solar.</p>
+        </div>
+        <button class="toggle" data-target="cannib-table-panel" aria-pressed="false">Table</button>
+      </div>
+      <div class="chart"><canvas id="cannib-chart"></canvas></div>
+    </section>
+    <section class="panel">
+      <div class="panel-head">
+        <div>
+          <h2>Solar in the same bands</h2>
+          <p class="note">The control variable. Where this line is high the price says
+             more about solar than about wind, which is why the band order alone
+             cannot be read as a cannibalisation curve.</p>
+        </div>
+      </div>
+      <div class="chart"><canvas id="cannib-solar-chart"></canvas></div>
+    </section>
+  </div>
+
+  <section class="panel" id="cannib-table-panel" hidden>
+    <div class="panel-head">
+      <div>
+        <h2>Penetration bands in full</h2>
+        <p class="note">Median penetration per band, what the region paid, what wind
+           earned, and how much of the fleet&rsquo;s output landed there.</p>
+      </div>
+    </div>
+    <div class="tablewrap" id="cannib-table"></div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <div>
+        <h2>How concentrated is the revenue?</h2>
+        <p class="note" id="conc-note">Share of regional wind revenue earned in the
+           best-paying intervals, ranked by the revenue each one produced. Two regions
+           can share a capture price and carry very different risk: revenue that arrives
+           in a handful of intervals depends on scarcity events surviving.</p>
+      </div>
+      <button class="toggle" data-target="conc-table" aria-pressed="false">Table</button>
+    </div>
+    <div class="chart"><canvas id="conc-chart"></canvas></div>
+    <div class="tablewrap" id="conc-table" hidden></div>
+  </section>
+
   <section class="panel">
     <div class="panel-head">
       <div>
@@ -141,15 +194,33 @@
   var charting = W.charting, get = W.get, fail = W.fail;
   W.wireToggles();
 
+  var optional = function (path) {
+    return get(path).catch(function () { return []; });
+  };
+
+  // A panel with no data is removed rather than left as an empty frame, which
+  // reads as a broken chart instead of an absent input.
+  var dropPanel = function (id) {
+    var node = document.getElementById(id);
+    var panel = node && node.closest(".panel");
+    if (panel) { panel.remove(); }
+  };
+
   Promise.all([
     get("freshness"), get("region_today"), get("cf_trend"),
     get("farm_cf_week"), get("revenue_region"), get("capture"),
-    get("quality"), get("meta"), get("farm_index")
+    get("quality"), get("meta"), get("farm_index"),
+    // These two are the only slices that can be legitimately absent: gold skips
+    // the cannibalisation model when bronze regional demand is missing, which is
+    // the state of a fresh clone or a fork. Promise.all rejects on one failure,
+    // so without this the whole dashboard goes blank over an optional panel.
+    optional("cannibalisation"), optional("revenue_concentration")
   ]).then(function (all) {
     var fresh = all[0][0] || {};
     var today = all[1], cf = all[2], farms = all[3];
     var revenue = all[4], capture = all[5], quality = all[6], meta = all[7];
     var index = all[8] || [];
+    var cannib = all[9] || [], conc = all[10] || [];
 
     // Installed capacity per region, taken from the farm index so revenue can
     // be shown per MW. Absolute revenue only says which region is biggest.
@@ -474,6 +545,187 @@
          { label: "TWAP $/MWh", num: true, get: function (r) { return num(r.twap_aud_mwh, 2); } },
          { label: "Ratio", num: true, get: function (r) { return r.capture_ratio === null ? "\u2014" : r.capture_ratio.toFixed(3); } }],
         capture);
+    }
+
+    /* ---- cannibalisation ------------------------------------------------ */
+    if (!cannib.length) {
+      dropPanel("cannib-chart");
+      dropPanel("cannib-solar-chart");
+      dropPanel("cannib-table");
+    }
+    if (!conc.length) { dropPanel("conc-chart"); }
+
+    if (cannib.length) {
+      // Fixed band order, and only the bands that actually occur: NSW has no
+      // interval above 45% wind penetration, and an empty category on the axis
+      // reads as a gap in the data rather than an absence of those conditions.
+      var bands = [1, 2, 3, 4, 5, 6, 7, 8].filter(function (b) {
+        return cannib.some(function (r) { return r.bucket === b; });
+      });
+      var bandLabels = bands.map(function (b) {
+        return (cannib.find(function (r) { return r.bucket === b; }) || {}).bucket_label;
+      });
+      var cannibBy = {};
+      cannib.forEach(function (r) {
+        (cannibBy[r.region] = cannibBy[r.region] || {})[r.bucket] = r;
+      });
+      var cannibRegions = Object.keys(cannibBy).sort();
+
+      var series = function (pick) {
+        return cannibRegions.map(function (region) {
+          return {
+            label: region,
+            data: bands.map(function (b) {
+              var row = cannibBy[region][b];
+              return row ? pick(row) : null;
+            }),
+            borderColor: colourOf(region), backgroundColor: colourOf(region),
+            borderWidth: 2, pointRadius: 4, pointHoverRadius: 6, tension: 0.25,
+            spanGaps: true
+          };
+        });
+      };
+
+      var zeroLine = {
+        label: "Zero",
+        data: bands.map(function () { return 0; }),
+        borderColor: css("--axis"), backgroundColor: css("--axis"),
+        borderWidth: 1, borderDash: [4, 4], pointRadius: 0, pointHoverRadius: 0, fill: false
+      };
+
+      plot("cannib-chart", {
+        type: "line",
+        data: {
+          labels: bandLabels,
+          datasets: series(function (r) { return r.capture_price_aud_mwh; }).concat([zeroLine])
+        },
+        options: {
+          interaction: { mode: "index", intersect: false },
+          plugins: {
+            legend: legendBlock,
+            tooltip: {
+              callbacks: {
+                label: function (c) {
+                  if (c.dataset.label === "Zero") return null;
+                  var row = (cannibBy[c.dataset.label] || {})[bands[c.dataIndex]];
+                  if (!row) return null;
+                  // The share of energy is what makes a band matter. A brutal
+                  // price in a band holding 0.3% of output is a curiosity.
+                  return c.dataset.label + ": " + money(row.capture_price_aud_mwh) +
+                         "/MWh \u00b7 " + num(row.pct_of_wind_energy, 1) + "% of output \u00b7 " +
+                         num(row.intervals, 0) + " intervals";
+                }
+              }
+            }
+          },
+          scales: {
+            x: axis({ title: { display: true, text: "wind as % of operational demand", color: css("--text-muted") } }),
+            y: axis({ title: { display: true, text: "$/MWh earned", color: css("--text-muted") } })
+          }
+        }
+      });
+
+      plot("cannib-solar-chart", {
+        type: "line",
+        data: {
+          labels: bandLabels,
+          datasets: series(function (r) { return r.median_solar_penetration_pct; })
+        },
+        options: {
+          interaction: { mode: "index", intersect: false },
+          plugins: {
+            legend: legendBlock,
+            tooltip: {
+              callbacks: {
+                label: function (c) {
+                  return c.dataset.label + ": " + num(c.parsed.y, 1) + "% solar";
+                }
+              }
+            }
+          },
+          scales: {
+            x: axis({ title: { display: true, text: "wind as % of operational demand", color: css("--text-muted") } }),
+            y: axis({ beginAtZero: true, title: { display: true, text: "solar % of demand", color: css("--text-muted") } })
+          }
+        }
+      });
+
+      table(document.getElementById("cannib-table"),
+        [{ label: "Region", get: function (r) { return '<span class="dot" style="background:' + colourOf(r.region) + '"></span>' + r.region; } },
+         { label: "Wind band", get: function (r) { return r.bucket_label; } },
+         { label: "Median wind %", num: true, get: function (r) { return num(r.median_penetration_pct, 1); } },
+         { label: "Median solar %", num: true, get: function (r) { return num(r.median_solar_penetration_pct, 1); } },
+         { label: "Earned $/MWh", num: true, get: function (r) { return num(r.capture_price_aud_mwh, 2); } },
+         { label: "Region $/MWh", num: true, get: function (r) { return num(r.avg_rrp_aud_mwh, 2); } },
+         { label: "% of output", num: true, get: function (r) { return num(r.pct_of_wind_energy, 1); } },
+         { label: "% intervals neg", num: true, get: function (r) { return num(r.pct_intervals_negative, 1); } },
+         { label: "Intervals", num: true, get: function (r) { return num(r.intervals, 0); } }],
+        cannib);
+    }
+
+    /* ---- revenue concentration ------------------------------------------ */
+    if (conc.length) {
+      // Nested cumulative shares are an ordered quantity, so one hue at three
+      // strengths rather than three hues: different colours would imply the
+      // slices are separate categories instead of one inside the next.
+      var base = css("--series-1");
+      var slices = [
+        { key: "pct_from_top_1pct", label: "Top 1% of intervals", alpha: "ff" },
+        { key: "pct_from_top_5pct", label: "Top 5%", alpha: "a6" },
+        { key: "pct_from_top_10pct", label: "Top 10%", alpha: "55" }
+      ];
+      var concRegions = conc.map(function (r) { return r.region; });
+
+      plot("conc-chart", {
+        type: "bar",
+        data: {
+          labels: concRegions,
+          datasets: slices.map(function (slice) {
+            return {
+              label: slice.label,
+              data: conc.map(function (r) { return r[slice.key]; }),
+              backgroundColor: base + slice.alpha,
+              borderColor: base,
+              borderWidth: 1
+            };
+          })
+        },
+        options: {
+          plugins: {
+            legend: legendBlock,
+            tooltip: {
+              callbacks: {
+                label: function (c) { return c.dataset.label + ": " + num(c.parsed.y, 1) + "% of revenue"; }
+              }
+            }
+          },
+          scales: {
+            x: axis(),
+            y: axis({ beginAtZero: true, title: { display: true, text: "% of net revenue", color: css("--text-muted") } })
+          }
+        }
+      });
+
+      var topN = conc[0].top_1pct_intervals;
+      document.getElementById("conc-note").innerHTML =
+        "Share of regional wind revenue earned in the best-paying intervals, ranked by " +
+        "the revenue each one produced. Two regions can share a capture price and carry " +
+        "very different risk. The top 1% here is <strong>" + num(topN, 0) +
+        " intervals</strong> of " + num(conc[0].intervals, 0) + ", covering " +
+        conc[0].first_date + " to " + conc[0].last_date +
+        " &mdash; a short enough record that these shares will move. A share above 100% " +
+        "is not an error: net revenue is the denominator, so where a region gives back " +
+        "enough at negative prices, the best intervals account for more than all of it.";
+
+      table(document.getElementById("conc-table"),
+        [{ label: "Region", get: function (r) { return '<span class="dot" style="background:' + colourOf(r.region) + '"></span>' + r.region; } },
+         { label: "Net revenue", num: true, get: function (r) { return money(r.revenue_aud); } },
+         { label: "Top 1%", num: true, get: function (r) { return num(r.pct_from_top_1pct, 1) + "%"; } },
+         { label: "Top 5%", num: true, get: function (r) { return num(r.pct_from_top_5pct, 1) + "%"; } },
+         { label: "Top 10%", num: true, get: function (r) { return num(r.pct_from_top_10pct, 1) + "%"; } },
+         { label: "Given back at neg. prices", num: true, get: function (r) { return money(r.negative_revenue_aud); } },
+         { label: "% intervals neg", num: true, get: function (r) { return num(r.pct_intervals_negative, 1); } }],
+        conc);
     }
 
     /* ---- quality -------------------------------------------------------- */
