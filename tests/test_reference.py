@@ -30,6 +30,7 @@ HEADERS = [
     "Station Name",
     "Region",
     "Dispatch Type",
+    "Schedule Type",
     "Fuel Source - Descriptor",
     "Technology Type - Descriptor",
     "DUID",
@@ -40,16 +41,16 @@ HEADERS = [
 # fuel source "Wind" because it sits beside the wind farm. Only the technology
 # and dispatch columns give it away.
 ROWS = [
-    ["Acme", "Example Wind Farm", "SA1", "Generator", "Wind", "Wind - Onshore", "EXWF1", 150.0],
-    ["Acme", "Example Wind Farm", "SA1", "Generator", "Wind", "Wind - Onshore", "EXWF2", 90.5],
-    ["Beta", "Coal Creek", "NSW1", "Generator", "Black Coal", "Steam Sub Critical", "COAL1", 700.0],
-    ["Gamma", "Sunny Solar", "QLD1", "Generator", "Solar", "Photovoltaic", "SOLAR1", 200.0],
-    ["Delta", "Hill Wind", "VIC1", "Generator", "Wind - Onshore", "Wind", "HILLWF1", 320.0],
-    ["Epsilon", "Island Wind", "TAS1", "Generator", "WIND", "Wind - Onshore", "ISLWF1", ""],
-    ["Zeta", "Offshore Trial", "", "Generator", "Wind", "Wind - Offshore", "NOREGION1", 50.0],
-    ["Neoen", "Hornsdale Power Reserve", "SA1", "Generator", "Wind", "Battery", "HPR1", 150.0],
-    ["Eta", "Big Battery", "VIC1", "Load", "Battery storage", "Battery Storage", "BATT1", 100.0],
-    ["Theta", "New BDU", "NSW1", "Bidirectional", "Wind", "", "BDU1", 80.0],
+    ["Acme", "Example Wind Farm", "SA1", "Generator", "Semi-Scheduled", "Wind", "Wind - Onshore", "EXWF1", 150.0],
+    ["Acme", "Example Wind Farm", "SA1", "Generator", "Semi-Scheduled", "Wind", "Wind - Onshore", "EXWF2", 90.5],
+    ["Beta", "Coal Creek", "NSW1", "Generator", "Scheduled", "Black Coal", "Steam Sub Critical", "COAL1", 700.0],
+    ["Gamma", "Sunny Solar", "QLD1", "Generator", "Semi-Scheduled", "Solar", "Photovoltaic", "SOLAR1", 200.0],
+    ["Delta", "Hill Wind", "VIC1", "Generator", "Semi-Scheduled", "Wind - Onshore", "Wind", "HILLWF1", 320.0],
+    ["Epsilon", "Island Wind", "TAS1", "Generator", "Non-Scheduled", "WIND", "Wind - Onshore", "ISLWF1", ""],
+    ["Zeta", "Offshore Trial", "", "Generator", "Semi-Scheduled", "Wind", "Wind - Offshore", "NOREGION1", 50.0],
+    ["Neoen", "Hornsdale Power Reserve", "SA1", "Generator", "Scheduled", "Wind", "Battery", "HPR1", 150.0],
+    ["Eta", "Big Battery", "VIC1", "Load", "Scheduled", "Battery storage", "Battery Storage", "BATT1", 100.0],
+    ["Theta", "New BDU", "NSW1", "Bidirectional", "Scheduled", "Wind", "", "BDU1", 80.0],
 ]
 
 
@@ -144,9 +145,11 @@ def test_matches_fuel_case_insensitively():
 
 
 def test_finds_the_header_even_when_columns_are_renamed():
+    # Indexed by name, not position: AEMO inserts columns between editions and
+    # so do we, and a positional fixture breaks on both.
     headers = list(HEADERS)
-    headers[4] = "Fuel Source - Primary"  # an older edition's spelling
-    headers[7] = "Registered Capacity (MW)"
+    headers[HEADERS.index("Fuel Source - Descriptor")] = "Fuel Source - Primary"
+    headers[HEADERS.index("Reg Cap (MW)")] = "Registered Capacity (MW)"
     rows = extract_wind(workbook_bytes(headers=headers)).kept
     assert len(rows) == 4
 
@@ -159,7 +162,8 @@ def test_reports_what_it_saw_when_a_column_is_missing():
 
 
 def test_rejects_a_workbook_with_no_wind():
-    rows = [r for r in ROWS if "ind" not in str(r[4]).lower()]
+    fuel = HEADERS.index("Fuel Source - Descriptor")
+    rows = [r for r in ROWS if "ind" not in str(r[fuel]).lower()]
     with pytest.raises(RegistryError, match="no wind rows"):
         extract_wind(workbook_bytes(rows=rows))
 
@@ -190,8 +194,51 @@ def test_csv_is_written_sorted_with_a_stable_header(tmp_path):
     write_csv(extract_wind(workbook_bytes()).kept, destination)
 
     lines = destination.read_text().splitlines()
-    assert lines[0] == "duid,station_name,region,fuel_type,capacity_mw,in_scada"
+    assert lines[0] == ("duid,station_name,region,fuel_type,capacity_mw,"
+                        "dispatch_type,schedule_type,in_scada")
     assert [line.split(",")[0] for line in lines[1:]] == ["EXWF1", "EXWF2", "HILLWF1", "ISLWF1"]
+
+
+def test_schedule_type_is_kept_and_is_not_dispatch_type():
+    """The two columns say different things and were once confused for each other.
+
+    `dispatch_type` is Generator / Load / Bidirectional, which is why
+    is_generation() uses it. The scheduling classification — Scheduled,
+    Semi-Scheduled, Non-Scheduled — is a separate column, and it is the one
+    curtailment needs: AEMO's SS_WIND_UIGF covers semi-scheduled units only.
+    """
+    rows = {row["duid"]: row for row in extract_wind(workbook_bytes()).kept}
+    assert rows["EXWF1"]["dispatch_type"] == "Generator"
+    assert rows["EXWF1"]["schedule_type"] == "Semi-Scheduled"
+    # The old Tasmanian farm: registered wind, dispatchable, but not
+    # semi-scheduled, so it is absent from the availability forecast. This row
+    # is why the unfiltered comparison showed output above availability.
+    assert rows["ISLWF1"]["dispatch_type"] == "Generator"
+    assert rows["ISLWF1"]["schedule_type"] == "Non-Scheduled"
+
+
+def test_schedule_type_is_matched_by_any_of_its_known_spellings():
+    """AEMO renames this column between editions, and we cannot see the live one."""
+    for spelling in ("Schedule Type", "Classification", "Scheduled Status"):
+        headers = list(HEADERS)
+        headers[HEADERS.index("Schedule Type")] = spelling
+        rows = {r["duid"]: r for r in extract_wind(workbook_bytes(headers=headers)).kept}
+        assert rows["EXWF1"]["schedule_type"] == "Semi-Scheduled", spelling
+
+
+def test_a_missing_schedule_column_is_blank_and_warned_about(caplog):
+    """Not fatal — every other consumer works without it — but never silent.
+
+    A blank is honest. Defaulting to "Scheduled" would make every farm from an
+    older edition look wrongly classified to a downstream filter.
+    """
+    headers = [h for h in HEADERS if h != "Schedule Type"]
+    idx = HEADERS.index("Schedule Type")
+    rows = [r[:idx] + r[idx + 1:] for r in ROWS]
+    with caplog.at_level("WARNING"):
+        kept = extract_wind(workbook_bytes(headers=headers, rows=rows)).kept
+    assert all(row["schedule_type"] == "" for row in kept)
+    assert "curtailment needs it" in caplog.text
 
 
 def test_meta_records_provenance(tmp_path):
