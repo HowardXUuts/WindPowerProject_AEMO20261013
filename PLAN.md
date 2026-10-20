@@ -847,3 +847,72 @@ One gold model at (region, trading_date) or (region, hour) grain, a few KB a
 day, plus one dashboard panel. The registry change is a column. The work is
 mostly in step 2 — confirming the populations now match — rather than in the
 SQL.
+
+## 6. Repo size: the budget, and pruning when it matters
+
+CLAUDE.md calls repo size a hard budget and names no number, which makes it
+impossible to act on. The number is **1 GB**: GitHub recommends staying under
+it, and a portfolio repository is something people clone, so the practical
+ceiling sits below the technical one.
+
+`python scripts/repo_size.py` prints the position every transform run. It
+converts bytes per day across seven sources at three grains into the only
+figure that drives a decision — months of runway — and it is a report, never a
+gate: a red hourly run over a slow-moving number gets ignored within a week.
+
+### Where the growth actually is
+
+Measured per source against each source's own observed days:
+
+```
+  bronze/scada               191 MB/yr      silver/wind_output      40 MB/yr
+  bronze/p5min                91 MB/yr      bronze/price            30 MB/yr
+  bronze/regionsum            43 MB/yr      bronze/interconnector    29 MB/yr
+  bronze/predispatch_region   36 MB/yr      bronze/predispatch_price 23 MB/yr
+  gold (per full rewrite)     45 MB/yr      silver/price             7 MB/yr
+                                            ---------------------------------
+                                            total                  534 MB/yr
+```
+
+Two things follow. Write-once layers cost their size once, so a year of them is
+a year of bytes. Gold costs its size *every time it changes* — 125 KB rewritten
+hourly would be 1.1 GB a year against 45 MB at one rewrite a day, which is why
+making gold byte-stable was worth doing and why it is reported per rewrite.
+
+### Pruning options, cheapest first
+
+**1. Do nothing.** At 534 MB/yr with 14 MB on disk there are roughly 23 months
+of runway. This is the correct answer today, and the report exists so the
+answer can be revisited on evidence rather than on anxiety.
+
+**2. Prune forecast history to a rolling window.** `p5min` and the two
+`predispatch` tables are about 150 MB/yr — 28% of all growth — and *nothing
+consumes them yet*. They exist for the ML phase, and forecasts lose value with
+age in a way that actuals do not: a P5MIN run from 2026 will not help a model
+trained in 2028, and walk-forward backtesting uses a bounded window regardless.
+Keeping 90 days rather than everything is the cheapest real lever and costs no
+analysis. Note it cannot be done by deleting files — git history is append-only,
+so pruning means not ingesting beyond the window, or accepting that the old
+blobs stay in history and only the working tree shrinks.
+
+**3. Day-grain bronze for `scada`.** The largest single line at 191 MB/yr.
+Measured earlier at roughly half the cost at day grain, against hour grain's
+one advantage: an hour can be sealed as soon as AEMO publishes into the next
+one, where a day cannot be sealed until the day ends. Costs a layer-contract
+change plus day-sealing logic, and the cost grows with the history there is to
+migrate — so if this is ever going to happen, earlier is cheaper.
+
+**4. Stop committing bronze for derived regional sources.** `regionsum` and
+`interconnector` are regional totals, 72 MB/yr together, and silver could hold
+what gold needs. This breaks the replayability that bronze exists for, so it
+is a real trade and not a free saving.
+
+**5. Last resort: a separate data repository**, or a history rewrite. Both
+break every existing clone and every permalink. Only worth it if the project
+outlives the budget by years rather than months.
+
+### What would change the picture
+
+A second ML source, a finer grain, or a new unit class in the registry. Each of
+those should be costed with `repo_size.py` before it is merged, not after —
+the report takes a second to run and the alternative is noticing at 900 MB.
