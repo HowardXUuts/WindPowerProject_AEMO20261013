@@ -223,6 +223,14 @@ jobs:
           echo "Could not push after 3 attempts." >&2
           exit 1
 
+      - name: Repo size report
+        # Reporting, never gating. The budget and the pruning options are in
+        # PLAN.md section 6; this puts the current position in every run log so
+        # the trend is visible before it is a problem.
+        if: always()
+        working-directory: ${{ github.workspace }}
+        run: python scripts/repo_size.py
+
       - name: Fail the run if quality failed
         # The commit above has already run, so silver is safe. Ending red is
         # what makes a hard quality failure impossible to miss.
