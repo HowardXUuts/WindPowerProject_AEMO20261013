@@ -1,109 +1,110 @@
-duid,station_name,region,fuel_type,capacity_mw,in_scada
-ARWF1,Ararat Wind Farm,VIC1,Wind,241.59,true
-BALDHWF1,Bald Hills Wind Farm,VIC1,Wind,106.6,true
-BANGOWF1,Bango 973 Wind Farm,NSW1,Wind,159.0,true
-BANGOWF2,Bango 999 Wind Farm,NSW1,Wind,84.8,true
-BLUFF1,The Bluff Wind Farm,SA1,Wind,52.5,true
-BOCORWF1,Boco Rock Wind Farm,NSW1,Wind,113.18,true
-BODWF1,Bodangora Wind Farm,NSW1,Wind,113.19,true
-BRYB1WF1,Berrybank Wind Farm,VIC1,Wind,180.6,true
-BRYB2WF2,Berrybank 2 Wind Farm,VIC1,Wind,109.0,true
-BULGANA1,Bulgana Green Power Hub,VIC1,Wind,204.0,true
-CAPTL_WF,Capital Wind Farm,NSW1,Wind,140.0,true
-CATHROCK,Cathedral Rocks,SA1,Wind,66.0,true
-CBWF1,Coonooer Bridge Wind Farm,VIC1,Wind,19.8,false
-CHALLHWF,Challicum Hills Wind Farm,VIC1,Wind,52.5,true
-CHPSTWF1,Chepstowe Wind Farm,VIC1,Wind,6.15,false
-CHYTWF1,Cherry Tree Wind Farm,VIC1,Wind,57.6,true
-CLEMGPWF,Clements Gap Wind Farm,SA1,Wind,57.0,true
-CLRKCWF1,Clarke Creek Wind Farm,QLD1,Wind,345.5,true
-CLRKCWF2,Clarke Creek Wind Farm,QLD1,Wind,103.5,true
-CNUNDAWF,Canunda Wind Farm,SA1,Wind,46.0,true
-CODRNGTON,Codrington Wind Farm,VIC1,Wind,18.2,false
-COLWF01,Collector Wind Farm 1,NSW1,Wind,226.0,true
-COOPGWF1,Coopers Gap Wind Farm,QLD1,Wind,452.0,true
-CROOKWF2,Crookwell 2 Wind Farm,NSW1,Wind,96.04,true
-CROOKWF3,Crookwell 3 Wind Farm,NSW1,Wind,57.0,true
-CROWLWF1,Crowlands Wind Farm,VIC1,Wind,79.95,true
-CRURWF1,Crudine Ridge Wind Farm,NSW1,Wind,141.0,true
-CTHLWF1,Cattle Hill Wind Farm,TAS1,Wind,148.0,true
-CULLRGWF,Cullerin Range Wind Farm,NSW1,Wind,30.0,true
-DIAPURWF1,Diapur Wind Farm,VIC1,Wind,8.0,true
-DULAWF1,Dulacca Wind Farm,QLD1,Wind,180.0,true
-DUNDWF1,Dundonnell Wind Farm,VIC1,Wind,168.0,true
-DUNDWF2,Dundonnell Wind Farm,VIC1,Wind,46.0,true
-DUNDWF3,Dundonnell Wind Farm,VIC1,Wind,121.0,true
-ELAINWF1,Elaine Wind Farm,VIC1,Wind,83.6,true
-FLYCRKWF,Flyers Creek Wind Farm,NSW1,Wind,145.0,true
-FNWF1,Ferguson North Wind Farm,VIC1,Wind,4.0,false
-FSWF1,Ferguson South Wind Farm,VIC1,Wind,8.0,false
-GPWFEST1,Golden Plains Wind Farm East,VIC1,Wind,248.0,true
-GPWFEST2,Golden Plains Wind Farm East,VIC1,Wind,260.4,true
-GPWFEST3,Golden Plains Wind Farm East,VIC1,Wind,248.0,true
-GPWFWST1,Golden Plains Wind Farm West,VIC1,Wind,266.0,true
-GPWFWST2,Golden Plains Wind Farm West,VIC1,Wind,310.0,true
-GRANWF1,Granville Harbour Wind Farm,TAS1,Wind,110.0,true
-GSWF1A,Goyder South Wind Farm 1A,SA1,Wind,209.0,true
-GSWF1B1,Goyder South Wind Farm 1B,SA1,Wind,203.0,true
-GULLRWF1,Gullen Range Wind Farm,NSW1,Wind,165.0,true
-GULLRWF2,Gullen Range Wind Farm,NSW1,Wind,110.0,true
-GUNNING1,Gunning Wind Farm,NSW1,Wind,46.5,true
-HALLWF1,Hallett 1 Wind Farm,SA1,Wind,94.5,true
-HALLWF2,Hallett 2 Wind Farm,SA1,Wind,71.4,true
-HD1WF1,Hawkesdale Wind Farm,VIC1,Wind,96.6,true
-HDWF1,Hornsdale Wind Farm,SA1,Wind,102.4,true
-HDWF2,Hornsdale Wind Farm 2,SA1,Wind,102.4,true
-HDWF3,Hornsdale Wind Farm 3,SA1,Wind,112.0,true
-HEPWIND1,Hepburn Community Wind Farm,VIC1,Wind,4.1,false
-KABANWF1,Kaban Wind Farm,QLD1,Wind,156.0,true
-KEPWF1,Kennedy Energy Park,QLD1,Wind,43.0,true
-KIATAWF1,Kiata Wind Farm,VIC1,Wind,31.05,true
-LGAPWF1,Lincoln Gap Wind Farm,SA1,Wind,126.0,true
-LGAPWF2,Lincoln Gap Wind Farm,SA1,Wind,86.0,true
-LKBONNY1,Lake Bonney Wind Farm Stage 1,SA1,Wind,80.5,true
-LKBONNY2,Lake Bonney Stage 2 Windfarm,SA1,Wind,159.0,true
-LKBONNY3,Lake Bonney Stage 3 Wind Farm,SA1,Wind,39.0,true
-MACARTH1,Macarthur Wind Farm,VIC1,Wind,420.0,true
-MAROOWF1,Maroona Wind Farm,VIC1,Wind,6.8,false
-MCINTYR1,MacIntyre Wind Farm,QLD1,Wind,923.0,true
-MERCER01,Mt Mercer Wind Farm,VIC1,Wind,131.2,true
-MEWF1,Mount Emerald Wind Farm,QLD1,Wind,180.0,true
-MLWF1,Mortons Lane Wind Farm,VIC1,Wind,20.0,true
-MOORAWF1,Moorabool Wind Farm,VIC1,Wind,312.0,true
-MRTLSWF1,Mortlake South Wind Farm,VIC1,Wind,157.5,true
-MTGELWF1,Mt Gellibrand Wind Farm,VIC1,Wind,138.0,true
-MTMILLAR,Mt Millar Wind Farm,SA1,Wind,70.0,true
-MUSSELR1,Musselroe Wind Farm,TAS1,Wind,168.0,true
-MUWAWF1,Murra Warra Wind Farm,VIC1,Wind,231.8,true
-MUWAWF2,Murra Warra Wind Farm Stage 2,VIC1,Wind,209.0,true
-NBHWF1,North Brown Hill Wind Farm,SA1,Wind,132.3,true
-OAKLAND1,Oaklands Hill Wind Farm,VIC1,Wind,67.0,true
-PAREPW1,Port Augusta Renewable Energy Park,SA1,Wind,210.0,true
-RYANCWF1,Ryan Corner Wind Farm,VIC1,Wind,218.4,true
-RYEPARK1,Rye Park Renewable Energy,NSW1,Wind,396.0,true
-SALTCRK1,Salt Creek Wind Farm,VIC1,Wind,54.0,true
-SAPHWF1,Sapphire Wind Farm,NSW1,Wind,270.0,true
-SNOWNTH1,Snowtown Wind Farm Stage 2 North,SA1,Wind,144.0,true
-SNOWSTH1,Snowtown South Wind Farm,SA1,Wind,126.0,true
-SNOWTWN1,Snowtown Wind Farm Units 1 And 47,SA1,Wind,99.0,true
-STARHLWF,Starfish Hill Wind Farm,SA1,Wind,34.5,true
-STOCKYD1,Stockyard Hill Wind Farm,VIC1,Wind,531.0,true
-STWF1,Silverton Wind Farm,NSW1,Wind,198.94,true
-TARALGA1,Taralga Wind Farm,NSW1,Wind,106.8,true
-TIMWEST,Timboon West Wind Farm,VIC1,Wind,7.2,false
-TOORAWF,Toora Wind Farm,VIC1,Wind,21.0,false
-WAMBOWF1,Wambo Wind Farm 1,QLD1,Wind,252.0,true
-WAMBOWF2,Wambo Wind Farm 2,QLD1,Wind,254.0,true
-WATERLWF,Waterloo Wind Farm,SA1,Wind,130.8,true
-WAUBRAWF,Waubra Wind Farm,VIC1,Wind,192.0,true
-WGWF1,Willogoleche Wind Farm,SA1,Wind,122.0,true
-WHILL1,Windy Hill Wind Farm,QLD1,Wind,12.0,false
-WONWP,Wonthaggi Wind Farm,VIC1,Wind,12.0,false
-WOODLWN1,Woodlawn Wind Farm,NSW1,Wind,48.3,true
-WOOLNTH1,Woolnorth Studland Bay / Bluff Point Wind Farm,TAS1,Wind,140.0,true
-WPWF,Wattle Point Wind Farm,SA1,Wind,90.75,true
-WRWF1,White Rock Wind Farm,NSW1,Wind,175.0,true
-YAMBUKWF,Yambuk Wind Farm,VIC1,Wind,30.0,true
-YAWWF1,Yawong Wind Farm,VIC1,Wind,7.2,false
-YENDWF1,Yendon Wind Farm,VIC1,Wind,144.4,true
-YSWF1,Yaloak South Wind Farm,VIC1,Wind,28.7,true
+duid,station_name,region,fuel_type,capacity_mw,dispatch_type,schedule_type,in_scada
+ARWF1,Ararat Wind Farm,VIC1,Wind,241.59,Generating Unit,Semi-Scheduled,true
+BALDHWF1,Bald Hills Wind Farm,VIC1,Wind,106.6,Generating Unit,Semi-Scheduled,true
+BANGOWF1,Bango 973 Wind Farm,NSW1,Wind,159.0,Generating Unit,Semi-Scheduled,true
+BANGOWF2,Bango 999 Wind Farm,NSW1,Wind,84.8,Generating Unit,Semi-Scheduled,true
+BLUFF1,The Bluff Wind Farm,SA1,Wind,52.5,Generating Unit,Semi-Scheduled,true
+BOCORWF1,Boco Rock Wind Farm,NSW1,Wind,113.18,Generating Unit,Semi-Scheduled,true
+BODWF1,Bodangora Wind Farm,NSW1,Wind,113.19,Generating Unit,Semi-Scheduled,true
+BRYB1WF1,Berrybank Wind Farm,VIC1,Wind,180.6,Generating Unit,Semi-Scheduled,true
+BRYB2WF2,Berrybank 2 Wind Farm,VIC1,Wind,109.0,Generating Unit,Semi-Scheduled,true
+BULGANA1,Bulgana Green Power Hub,VIC1,Wind,204.0,Generating Unit,Semi-Scheduled,true
+CAPTL_WF,Capital Wind Farm,NSW1,Wind,140.0,Generating Unit,Non-Scheduled,true
+CATHROCK,Cathedral Rocks,SA1,Wind,66.0,Generating Unit,Non-Scheduled*,true
+CBWF1,Coonooer Bridge Wind Farm,VIC1,Wind,19.8,Generating Unit,Non-Scheduled,false
+CHALLHWF,Challicum Hills Wind Farm,VIC1,Wind,52.5,Generating Unit,Non-Scheduled,true
+CHPSTWF1,Chepstowe Wind Farm,VIC1,Wind,6.15,Generating Unit,Non-Scheduled,false
+CHYTWF1,Cherry Tree Wind Farm,VIC1,Wind,57.6,Generating Unit,Semi-Scheduled,true
+CLEMGPWF,Clements Gap Wind Farm,SA1,Wind,57.0,Generating Unit,Semi-Scheduled,true
+CLRKCWF1,Clarke Creek Wind Farm,QLD1,Wind,345.5,Generating Unit,Semi-Scheduled,true
+CLRKCWF2,Clarke Creek Wind Farm,QLD1,Wind,103.5,Generating Unit,Semi-Scheduled,true
+CNUNDAWF,Canunda Wind Farm,SA1,Wind,46.0,Generating Unit,Non-Scheduled*,true
+CODRNGTON,Codrington Wind Farm,VIC1,Wind,18.2,Generating Unit,Non-Scheduled,false
+COLWF01,Collector Wind Farm 1,NSW1,Wind,226.0,Generating Unit,Semi-Scheduled,true
+COOPGWF1,Coopers Gap Wind Farm,QLD1,Wind,452.0,Generating Unit,Semi-Scheduled,true
+CROOKWF2,Crookwell 2 Wind Farm,NSW1,Wind,96.04,Generating Unit,Semi-Scheduled,true
+CROOKWF3,Crookwell 3 Wind Farm,NSW1,Wind,57.0,Generating Unit,Semi-Scheduled,true
+CROWLWF1,Crowlands Wind Farm,VIC1,Wind,79.95,Generating Unit,Semi-Scheduled,true
+CRURWF1,Crudine Ridge Wind Farm,NSW1,Wind,141.0,Generating Unit,Semi-Scheduled,true
+CTHLWF1,Cattle Hill Wind Farm,TAS1,Wind,148.0,Generating Unit,Semi-Scheduled,true
+CULLRGWF,Cullerin Range Wind Farm,NSW1,Wind,30.0,Generating Unit,Non-Scheduled,true
+DIAPURWF1,Diapur Wind Farm,VIC1,Wind,8.0,Generating Unit,Non-Scheduled,true
+DULAWF1,Dulacca Wind Farm,QLD1,Wind,180.0,Generating Unit,Semi-Scheduled,true
+DUNDWF1,Dundonnell Wind Farm,VIC1,Wind,168.0,Generating Unit,Semi-Scheduled,true
+DUNDWF2,Dundonnell Wind Farm,VIC1,Wind,46.0,Generating Unit,Semi-Scheduled,true
+DUNDWF3,Dundonnell Wind Farm,VIC1,Wind,121.0,Generating Unit,Semi-Scheduled,true
+ELAINWF1,Elaine Wind Farm,VIC1,Wind,83.6,Generating Unit,Semi-Scheduled,true
+FLYCRKWF,Flyers Creek Wind Farm,NSW1,Wind,145.0,Generating Unit,Semi-Scheduled,true
+FNWF1,Ferguson North Wind Farm,VIC1,Wind,4.0,Generating Unit,Non-Scheduled,false
+FSWF1,Ferguson South Wind Farm,VIC1,Wind,8.0,Generating Unit,Non-Scheduled,false
+GPWFEST1,Golden Plains Wind Farm East,VIC1,Wind,248.0,Generating Unit,Semi-Scheduled,true
+GPWFEST2,Golden Plains Wind Farm East,VIC1,Wind,260.4,Generating Unit,Semi-Scheduled,true
+GPWFEST3,Golden Plains Wind Farm East,VIC1,Wind,248.0,Generating Unit,Semi-Scheduled,true
+GPWFWST1,Golden Plains Wind Farm West,VIC1,Wind,266.0,Generating Unit,Semi-Scheduled,true
+GPWFWST2,Golden Plains Wind Farm West,VIC1,Wind,310.0,Generating Unit,Semi-Scheduled,true
+GRANWF1,Granville Harbour Wind Farm,TAS1,Wind,110.0,Generating Unit,Semi-Scheduled,true
+GSWF1A,Goyder South Wind Farm 1A,SA1,Wind,209.0,Generating Unit,Semi-Scheduled,true
+GSWF1B1,Goyder South Wind Farm 1B,SA1,Wind,203.0,Generating Unit,Semi-Scheduled,true
+GULLRWF1,Gullen Range Wind Farm,NSW1,Wind,165.0,Generating Unit,Semi-Scheduled,true
+GULLRWF2,Gullen Range Wind Farm,NSW1,Wind,110.0,Generating Unit,Semi-Scheduled,true
+GUNNING1,Gunning Wind Farm,NSW1,Wind,46.5,Generating Unit,Semi-Scheduled,true
+HALLWF1,Hallett 1 Wind Farm,SA1,Wind,94.5,Generating Unit,Semi-Scheduled,true
+HALLWF2,Hallett 2 Wind Farm,SA1,Wind,71.4,Generating Unit,Semi-Scheduled,true
+HD1WF1,Hawkesdale Wind Farm,VIC1,Wind,96.6,Generating Unit,Semi-Scheduled,true
+HDWF1,Hornsdale Wind Farm,SA1,Wind,102.4,Generating Unit,Semi-Scheduled,true
+HDWF2,Hornsdale Wind Farm 2,SA1,Wind,102.4,Generating Unit,Semi-Scheduled,true
+HDWF3,Hornsdale Wind Farm 3,SA1,Wind,112.0,Generating Unit,Semi-Scheduled,true
+HEPWIND1,Hepburn Community Wind Farm,VIC1,Wind,4.1,Generating Unit,Non-Scheduled,false
+KABANWF1,Kaban Wind Farm,QLD1,Wind,156.0,Generating Unit,Semi-Scheduled,true
+KEPWF1,Kennedy Energy Park,QLD1,Wind,43.0,Generating Unit,Semi-Scheduled,true
+KIATAWF1,Kiata Wind Farm,VIC1,Wind,31.05,Generating Unit,Semi-Scheduled,true
+LGAPWF1,Lincoln Gap Wind Farm,SA1,Wind,126.0,Generating Unit,Semi-Scheduled,true
+LGAPWF2,Lincoln Gap Wind Farm,SA1,Wind,86.0,Generating Unit,Semi-Scheduled,true
+LKBONNY1,Lake Bonney Wind Farm Stage 1,SA1,Wind,80.5,Generating Unit,Non-Scheduled*,true
+LKBONNY2,Lake Bonney Stage 2 Windfarm,SA1,Wind,159.0,Generating Unit,Semi-Scheduled,true
+LKBONNY3,Lake Bonney Stage 3 Wind Farm,SA1,Wind,39.0,Generating Unit,Semi-Scheduled,true
+MACARTH1,Macarthur Wind Farm,VIC1,Wind,420.0,Generating Unit,Semi-Scheduled,true
+MAROOWF1,Maroona Wind Farm,VIC1,Wind,6.8,Generating Unit,Non-Scheduled,false
+MCINTYR1,MacIntyre Wind Farm,QLD1,Wind,923.0,Generating Unit,Semi-Scheduled,true
+MERCER01,Mt Mercer Wind Farm,VIC1,Wind,131.2,Generating Unit,Semi-Scheduled,true
+MEWF1,Mount Emerald Wind Farm,QLD1,Wind,180.0,Generating Unit,Semi-Scheduled,true
+MLWF1,Mortons Lane Wind Farm,VIC1,Wind,20.0,Generating Unit,Non-Scheduled,true
+MOORAWF1,Moorabool Wind Farm,VIC1,Wind,312.0,Generating Unit,Semi-Scheduled,true
+MRTLSWF1,Mortlake South Wind Farm,VIC1,Wind,157.5,Generating Unit,Semi-Scheduled,true
+MTGELWF1,Mt Gellibrand Wind Farm,VIC1,Wind,138.0,Generating Unit,Semi-Scheduled,true
+MTMILLAR,Mt Millar Wind Farm,SA1,Wind,70.0,Generating Unit,Non-Scheduled*,true
+MUSSELR1,Musselroe Wind Farm,TAS1,Wind,168.0,Generating Unit,Semi-Scheduled,true
+MUWAWF1,Murra Warra Wind Farm,VIC1,Wind,231.8,Generating Unit,Semi-Scheduled,true
+MUWAWF2,Murra Warra Wind Farm Stage 2,VIC1,Wind,209.0,Generating Unit,Semi-Scheduled,true
+NBHWF1,North Brown Hill Wind Farm,SA1,Wind,132.3,Generating Unit,Semi-Scheduled,true
+OAKLAND1,Oaklands Hill Wind Farm,VIC1,Wind,67.0,Generating Unit,Semi-Scheduled,true
+PAREPW1,Port Augusta Renewable Energy Park,SA1,Wind,210.0,Generating Unit,Semi-Scheduled,true
+RYANCWF1,Ryan Corner Wind Farm,VIC1,Wind,218.4,Generating Unit,Semi-Scheduled,true
+RYEPARK1,Rye Park Renewable Energy,NSW1,Wind,396.0,Generating Unit,Semi-Scheduled,true
+SALTCRK1,Salt Creek Wind Farm,VIC1,Wind,54.0,Generating Unit,Semi-Scheduled,true
+SAPHWF1,Sapphire Wind Farm,NSW1,Wind,270.0,Generating Unit,Semi-Scheduled,true
+SNOWNTH1,Snowtown Wind Farm Stage 2 North,SA1,Wind,144.0,Generating Unit,Semi-Scheduled,true
+SNOWSTH1,Snowtown South Wind Farm,SA1,Wind,126.0,Generating Unit,Semi-Scheduled,true
+SNOWTWN1,Snowtown Wind Farm Units 1 And 47,SA1,Wind,99.0,Generating Unit,Semi-Scheduled,true
+STARHLWF,Starfish Hill Wind Farm,SA1,Wind,34.5,Generating Unit,Non-Scheduled*,true
+STOCKYD1,Stockyard Hill Wind Farm,VIC1,Wind,531.0,Generating Unit,Semi-Scheduled,true
+STWF1,Silverton Wind Farm,NSW1,Wind,198.94,Generating Unit,Semi-Scheduled,true
+TARALGA1,Taralga Wind Farm,NSW1,Wind,106.8,Generating Unit,Semi-Scheduled,true
+TIMWEST,Timboon West Wind Farm,VIC1,Wind,7.2,Generating Unit,Non-Scheduled,false
+TOORAWF,Toora Wind Farm,VIC1,Wind,21.0,Generating Unit,Non-Scheduled,false
+UWF1,Uungula Wind Farm,NSW1,Wind,414.0,Generating Unit,Semi-Scheduled,true
+WAMBOWF1,Wambo Wind Farm 1,QLD1,Wind,252.0,Generating Unit,Semi-Scheduled,true
+WAMBOWF2,Wambo Wind Farm 2,QLD1,Wind,254.0,Generating Unit,Semi-Scheduled,true
+WATERLWF,Waterloo Wind Farm,SA1,Wind,130.8,Generating Unit,Semi-Scheduled,true
+WAUBRAWF,Waubra Wind Farm,VIC1,Wind,192.0,Generating Unit,Non-Scheduled,true
+WGWF1,Willogoleche Wind Farm,SA1,Wind,122.0,Generating Unit,Semi-Scheduled,true
+WHILL1,Windy Hill Wind Farm,QLD1,Wind,12.0,Generating Unit,Non-Scheduled,false
+WONWP,Wonthaggi Wind Farm,VIC1,Wind,12.0,Generating Unit,Non-Scheduled,false
+WOODLWN1,Woodlawn Wind Farm,NSW1,Wind,48.3,Generating Unit,Semi-Scheduled,true
+WOOLNTH1,Woolnorth Studland Bay / Bluff Point Wind Farm,TAS1,Wind,140.0,Generating Unit,Non-Scheduled,true
+WPWF,Wattle Point Wind Farm,SA1,Wind,90.75,Generating Unit,Non-Scheduled*,true
+WRWF1,White Rock Wind Farm,NSW1,Wind,175.0,Generating Unit,Semi-Scheduled,true
+YAMBUKWF,Yambuk Wind Farm,VIC1,Wind,30.0,Generating Unit,Non-Scheduled,true
+YAWWF1,Yawong Wind Farm,VIC1,Wind,7.2,Generating Unit,Non-Scheduled,false
+YENDWF1,Yendon Wind Farm,VIC1,Wind,144.4,Generating Unit,Semi-Scheduled,true
+YSWF1,Yaloak South Wind Farm,VIC1,Wind,28.7,Generating Unit,Non-Scheduled,true

@@ -1,9 +1,9 @@
 {
   "source_url": "https://aemo.com.au/-/media/files/electricity/nem/participant_information/nem-registration-and-exemption-list.xls",
-  "retrieved_at": "2026-10-13T04:32:22+00:00",
-  "source_sha256": "e316d89887f0e0938f7e68dc986b26923d2bf56b9f9c79ae15d64528b5c2f91f",
-  "source_bytes": 786539,
-  "wind_duids": 108,
+  "retrieved_at": "2026-10-20T03:53:04+00:00",
+  "source_sha256": "a3800b9f535851ebd204de4948fedb0b14dbb2014f770d788bc848f6b8674a21",
+  "source_bytes": 784951,
+  "wind_duids": 109,
   "regions": [
     "NSW1",
     "QLD1",
@@ -11,8 +11,8 @@
     "TAS1",
     "VIC1"
   ],
-  "total_capacity_mw": 14972.7,
-  "in_scada": 96,
+  "total_capacity_mw": 15386.7,
+  "in_scada": 97,
   "not_in_scada": 12,
   "excluded_non_generation": [
     {
