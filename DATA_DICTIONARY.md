@@ -213,6 +213,24 @@ wind capture price against the time-weighted average, per region per day.
 | `intervals` | BIGINT |
 | `price_intervals` | BIGINT |
 
+### `curtailment`
+
+wind that was available and did not run, split by why.
+
+| Column | Type |
+|---|---|
+| `region` | VARCHAR |
+| `trading_date` | DATE |
+| `available_mwh` | DOUBLE |
+| `actual_mwh` | DOUBLE |
+| `curtailed_mwh` | DOUBLE |
+| `pct_of_available` | DOUBLE |
+| `economic_mwh` | DOUBLE |
+| `network_mwh` | DOUBLE |
+| `intervals` | BIGINT |
+| `curtailed_intervals` | BIGINT |
+| `tolerance_pct` | DECIMAL(2,1) |
+
 ### `demand_shape`
 
 when in the day does wind arrive, relative to the demand it is sold into?

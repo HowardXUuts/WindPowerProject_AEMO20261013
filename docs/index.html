@@ -242,6 +242,33 @@
   <section class="panel">
     <div class="panel-head">
       <div>
+        <h2>Wind that was available and did not run</h2>
+        <p class="note" id="curt-note">The gap between AEMO&rsquo;s unconstrained
+           availability forecast for semi-scheduled wind and what was actually
+           metered, split by whether the price was negative at the time.</p>
+      </div>
+      <button class="toggle" data-target="curt-table-panel" aria-pressed="false">Table</button>
+    </div>
+    <div class="chart"><canvas id="curt-chart"></canvas></div>
+  </section>
+
+  <section class="panel" id="curt-table-panel" hidden>
+    <div class="panel-head">
+      <div>
+        <h2>Curtailment detail</h2>
+        <p class="note">Availability covers <strong>semi-scheduled units only</strong>, so
+           output is filtered to match &mdash; 27 of 109 registered wind DUIDs are not
+           semi-scheduled, and comparing the two populations put Tasmania&rsquo;s output
+           above its own forecast. Gaps inside the tolerance are counted as forecast
+           error rather than curtailment.</p>
+      </div>
+    </div>
+    <div class="tablewrap" id="curt-table"></div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <div>
         <h2>Revenue and capture detail</h2>
         <p class="note">Capture price is what wind earned per MWh; TWAP is what an even
            generator would have earned. Below 1.0 is the cannibalisation effect.</p>
@@ -303,7 +330,7 @@
     // so without this the whole dashboard goes blank over an optional panel.
     optional("cannibalisation"), optional("revenue_concentration"),
     optional("negative_runs"), optional("negative_worst"),
-    optional("correlation"), optional("demand_shape")
+    optional("correlation"), optional("demand_shape"), optional("curtailment")
   ]).then(function (all) {
     var fresh = all[0][0] || {};
     var today = all[1], cf = all[2], farms = all[3];
@@ -313,6 +340,7 @@
     var negRuns = all[11] || [], negWorst = all[12] || [];
     var corr = all[13] || [];
     var shape = all[14] || [];
+    var curt = all[15] || [];
 
     // Installed capacity per region, taken from the farm index so revenue can
     // be shown per MW. Absolute revenue only says which region is biggest.
@@ -1136,6 +1164,110 @@
          { label: "Wind % of demand", num: true, get: function (r) { return num(r.penetration_pct, 1) + "%"; } },
          { label: "Days", num: true, get: function (r) { return num(r.days, 0); } }],
         shape);
+    }
+
+    /* ---- curtailment ---------------------------------------------------- */
+    if (!curt.length) {
+      dropPanel("curt-chart");
+      dropPanel("curt-table");
+    }
+
+    if (curt.length) {
+      // Totals per region, because a daily series across five regions is
+      // noisier than the finding. The split is the finding.
+      var curtBy = {};
+      curt.forEach(function (r) {
+        var t = curtBy[r.region] = curtBy[r.region] || {
+          available: 0, curtailed: 0, economic: 0, network: 0, intervals: 0
+        };
+        t.available += r.available_mwh || 0;
+        t.curtailed += r.curtailed_mwh || 0;
+        t.economic += r.economic_mwh || 0;
+        t.network += r.network_mwh || 0;
+        t.intervals += r.curtailed_intervals || 0;
+      });
+      var curtRegions = Object.keys(curtBy).sort(function (a, b) {
+        return (curtBy[b].curtailed / (curtBy[b].available || 1)) -
+               (curtBy[a].curtailed / (curtBy[a].available || 1));
+      });
+
+      var share = function (region, key) {
+        var t = curtBy[region];
+        return t.available ? 100 * t[key] / t.available : null;
+      };
+
+      plot("curt-chart", {
+        type: "bar",
+        data: {
+          labels: curtRegions,
+          datasets: [
+            {
+              label: "Negative price (economic)",
+              data: curtRegions.map(function (r) { return share(r, "economic"); }),
+              backgroundColor: css("--series-2"), borderColor: css("--series-2"), borderWidth: 1
+            },
+            {
+              label: "Price above zero (likely network)",
+              data: curtRegions.map(function (r) { return share(r, "network"); }),
+              backgroundColor: css("--series-1"), borderColor: css("--series-1"), borderWidth: 1
+            }
+          ]
+        },
+        options: {
+          interaction: { mode: "index", intersect: false },
+          plugins: {
+            legend: legendBlock,
+            tooltip: {
+              callbacks: {
+                label: function (c) {
+                  var t = curtBy[curtRegions[c.dataIndex]];
+                  var key = c.datasetIndex === 0 ? "economic" : "network";
+                  return c.dataset.label + ": " + num(c.parsed.y, 1) + "% of available \u00b7 " +
+                         num(t[key], 0) + " MWh";
+                },
+                afterBody: function (items) {
+                  var t = curtBy[curtRegions[items[0].dataIndex]];
+                  return "total " + num(100 * t.curtailed / (t.available || 1), 1) +
+                         "% \u00b7 " + num(t.curtailed, 0) + " of " +
+                         num(t.available, 0) + " MWh available";
+                }
+              }
+            }
+          },
+          scales: {
+            x: axis({ stacked: true }),
+            y: axis({ stacked: true, beginAtZero: true,
+                      title: { display: true, text: "% of available wind not run",
+                               color: css("--text-muted") } })
+          }
+        }
+      });
+
+      var worst = curtRegions[0];
+      var worstEconomic = curtBy[worst].curtailed
+        ? 100 * curtBy[worst].economic / curtBy[worst].curtailed : 0;
+      document.getElementById("curt-note").innerHTML =
+        "The gap between AEMO&rsquo;s unconstrained availability forecast for " +
+        "semi-scheduled wind and what was actually metered, split by whether the price " +
+        "was negative at the time. <strong>" + esc(worst) + "</strong> gave up " +
+        "<strong>" + num(share(worst, "curtailed"), 1) + "% of its available wind</strong>, " +
+        num(worstEconomic, 0) + "% of it while the price was below zero &mdash; which is a " +
+        "choice, and the half a battery or a different offtake could change. " +
+        "A gap inside " + num(curt[0].tolerance_pct, 0) + "% of availability is treated as " +
+        "forecast error, not curtailment. This is a proxy: AEMO&rsquo;s own " +
+        "<code>SEMIDISPATCHCAP</code> flag would be definitive and is not ingested.";
+
+      table(document.getElementById("curt-table"),
+        [{ label: "Region", get: function (r) { return '<span class="dot" style="background:' + colourOf(r.region) + '"></span>' + r.region; } },
+         { label: "Date", get: function (r) { return r.trading_date; } },
+         { label: "Available MWh", num: true, get: function (r) { return num(r.available_mwh, 0); } },
+         { label: "Metered MWh", num: true, get: function (r) { return num(r.actual_mwh, 0); } },
+         { label: "Curtailed MWh", num: true, get: function (r) { return num(r.curtailed_mwh, 0); } },
+         { label: "% of available", num: true, get: function (r) { return num(r.pct_of_available, 1) + "%"; } },
+         { label: "Economic MWh", num: true, get: function (r) { return num(r.economic_mwh, 0); } },
+         { label: "Network MWh", num: true, get: function (r) { return num(r.network_mwh, 0); } },
+         { label: "Intervals", num: true, get: function (r) { return num(r.curtailed_intervals, 0) + " / " + num(r.intervals, 0); } }],
+        curt);
     }
 
     /* ---- quality -------------------------------------------------------- */

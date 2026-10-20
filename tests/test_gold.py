@@ -20,6 +20,7 @@ Regional demand is fixed so the penetration bands are exact, and solar is set
 so the two SA1 bands differ in it — the control column has to be shown to be
 carried through, not merely present:
 
+  SA1   availability 100 MW, VIC1 availability 26 MW (for curtailment)
   SA1   demand 200 MW, solar 50 MW then 0 MW
         wind penetration  80/200 = 40%  (band 4)  then  20/200 = 10%  (band 2)
         solar penetration 50/200 = 25%            then   0/200 =  0%
@@ -66,10 +67,10 @@ CREATE OR REPLACE TABLE price (
 )
 """
 
-REGISTRY = """duid,station_name,region,fuel_type,capacity_mw,in_scada
-WFA1,Alpha Wind Farm,SA1,Wind,100.0,true
-WFB1,Beta Wind Farm,VIC1,Wind,50.0,true
-WFOFF1,Offline Wind Farm,VIC1,Wind,20.0,false
+REGISTRY = """duid,station_name,region,fuel_type,capacity_mw,dispatch_type,schedule_type,in_scada
+WFA1,Alpha Wind Farm,SA1,Wind,100.0,Generating Unit,Semi-Scheduled,true
+WFB1,Beta Wind Farm,VIC1,Wind,50.0,Generating Unit,Semi-Scheduled,true
+WFOFF1,Offline Wind Farm,VIC1,Wind,20.0,Generating Unit,Non-Scheduled,false
 """
 
 
@@ -96,9 +97,9 @@ def _write(ddl, table, rows, destination):
 def regionsum_rows():
     """Bronze regional demand. settlementdate is interval-ENDING, as AEMO sends it."""
     rows = []
-    for region, demand, solar in (
-        ("SA1", 200.0, lambda i: 50.0 if i < HALF else 0.0),
-        ("VIC1", 100.0, lambda i: 10.0),
+    for region, demand, solar, wind_uigf in (
+        ("SA1", 200.0, lambda i: 50.0 if i < HALF else 0.0, 100.0),
+        ("VIC1", 100.0, lambda i: 10.0, 26.0),
     ):
         for i in range(INTERVALS):
             utc, _ = starts(i)
@@ -106,7 +107,7 @@ def regionsum_rows():
             rows.append(
                 (
                     end, region, 0, demand, demand * 2, 0.0,
-                    None, solar(i), None, None, None, end,
+                    wind_uigf, solar(i), None, None, None, end,
                     "d.zip", end,
                 )
             )
@@ -961,6 +962,154 @@ def test_shape_is_skipped_without_regional_demand(tmp_path):
     )
     assert "demand_shape" not in written
     assert not (tmp_path / "gold" / "demand_shape.parquet").exists()
+
+
+# --- curtailment ----------------------------------------------------------
+
+# The main fixture already supplies both sides exactly:
+#
+#   SA1   availability 100 MW; WFA1 meters 80 MW then 20 MW
+#         gap 20 MW (20% of availability) then 80 MW (80%) -> both counted
+#         price $100 then -$10 -> the first half is network, the second economic
+#   VIC1  availability 26 MW; WFB1 meters a flat 25 MW
+#         gap 1 MW = 3.8% of availability -> inside tolerance, not curtailment
+#
+#   SA1 available   100 x 288 / 12            = 2,400 MWh
+#   SA1 curtailed   (20 x 144 + 80 x 144) / 12 = 1,200 MWh = 50% of available
+#   SA1 economic    80 x 144 / 12              =   960 MWh  (the negative half)
+#   SA1 network     20 x 144 / 12              =   240 MWh  (the positive half)
+
+
+def test_curtailment_is_exact(gold):
+    df = rows(gold, "curtailment", "region").set_index("region")
+    assert df.loc["SA1", "available_mwh"] == pytest.approx(2400.0, abs=5e-3)
+    assert df.loc["SA1", "actual_mwh"] == pytest.approx(1200.0, abs=5e-3)
+    assert df.loc["SA1", "curtailed_mwh"] == pytest.approx(1200.0, abs=5e-3)
+    assert df.loc["SA1", "pct_of_available"] == pytest.approx(50.0, abs=5e-4)
+
+
+def test_the_economic_network_split_follows_the_price_sign(gold):
+    """A negative price is an unambiguous reason to back off; a positive one is not."""
+    df = rows(gold, "curtailment", "region").set_index("region")
+    assert df.loc["SA1", "economic_mwh"] == pytest.approx(960.0, abs=5e-3)
+    assert df.loc["SA1", "network_mwh"] == pytest.approx(240.0, abs=5e-3)
+
+
+def test_economic_plus_network_equals_curtailed(gold):
+    """The invariant a consumer will assume, and the one a null would break.
+
+    A FILTER over an empty set returns null, not zero, so a region with
+    curtailment but no negative-price interval reported null economic MWh and
+    broke the sum. Zero is the right answer there: that curtailment genuinely
+    did not happen at a negative price.
+    """
+    for row in rows(gold, "curtailment", "region").itertuples():
+        assert row.economic_mwh is not None
+        assert row.network_mwh is not None
+        assert row.economic_mwh + row.network_mwh == pytest.approx(
+            row.curtailed_mwh, abs=1e-2
+        ), row.region
+
+
+def test_a_gap_inside_the_tolerance_is_forecast_error_not_curtailment(gold):
+    """UIGF is a forecast. A 3.8% overshoot is ordinary and must not be counted.
+
+    VIC1 meters 25 MW against 26 MW of availability every interval, so every
+    interval has a gap and none of them is curtailment.
+    """
+    df = rows(gold, "curtailment", "region").set_index("region")
+    assert df.loc["VIC1", "curtailed_mwh"] == pytest.approx(0.0, abs=5e-3)
+    assert df.loc["VIC1", "curtailed_intervals"] == 0
+    assert df.loc["VIC1", "intervals"] == INTERVALS, "the intervals still counted"
+    assert df.loc["VIC1", "pct_of_available"] == pytest.approx(0.0, abs=5e-4)
+
+
+def test_the_tolerance_is_published_with_the_figure(gold):
+    """The number moves with the assumption, so the assumption travels with it."""
+    df = rows(gold, "curtailment", "region")
+    assert set(df.tolerance_pct) == {5.0}
+
+
+# --- curtailment: the semi-scheduled filter --------------------------------
+
+# A separate fixture, because this needs a third farm and the shared one is
+# pinned by a dozen other assertions. It reproduces the real Tasmanian case:
+#
+#   CURSS1  semi-scheduled, meters 60 MW   ] availability is 100 MW and covers
+#   CURNS1  NON-scheduled,  meters 70 MW   ] only the semi-scheduled unit
+#
+# Unfiltered the two sum to 130 MW against 100 MW of availability — output above
+# its own forecast, which is impossible for the same units and is exactly what
+# Tasmania showed before the registry carried schedule_type. Filtered, it is
+# 60 MW against 100 MW: a real 40% gap.
+
+CURTAIL_DAY = date(2026, 10, 16)
+CURTAIL_REGISTRY = (
+    "duid,station_name,region,fuel_type,capacity_mw,dispatch_type,schedule_type,in_scada\n"
+    "CURSS1,Semi Farm,CUR1,Wind,100.0,Generating Unit,Semi-Scheduled,true\n"
+    "CURNS1,Old Farm,CUR1,Wind,100.0,Generating Unit,Non-Scheduled*,true\n"
+)
+
+
+@pytest.fixture
+def curtail_gold(tmp_path):
+    """Gold where a non-scheduled farm would wreck the comparison if admitted."""
+    silver, bronze = tmp_path / "silver", tmp_path / "bronze"
+    wind, price, demand = [], [], []
+    for i in range(INTERVALS):
+        nem_local = datetime(CURTAIL_DAY.year, CURTAIL_DAY.month, CURTAIL_DAY.day) \
+            + timedelta(minutes=5 * i)
+        utc = nem_local.replace(tzinfo=NEM_TZ)
+        end = utc + timedelta(minutes=5)
+        for duid, name, mw in (("CURSS1", "Semi Farm", 60.0), ("CURNS1", "Old Farm", 70.0)):
+            wind.append((
+                CURTAIL_DAY, utc, nem_local, end, nem_local + timedelta(minutes=5),
+                duid, name, "CUR1", 100.0, mw, False, False, "f.zip", INTERVALS, True,
+            ))
+        price.append((
+            CURTAIL_DAY, utc, nem_local, end, nem_local + timedelta(minutes=5),
+            "CUR1", 50.0, False, 0, 0, 0, "p.zip", INTERVALS, True,
+        ))
+        demand.append((
+            end, "CUR1", 0, 500.0, 1000.0, 0.0, 100.0, 0.0, None, None, None, end,
+            "d.zip", end,
+        ))
+
+    _write(WIND_DDL, "wind", wind, silver / "wind_output" / f"date={CURTAIL_DAY}.parquet")
+    _write(PRICE_DDL, "price", price, silver / "price" / f"date={CURTAIL_DAY}.parquet")
+    by_hour: dict = {}
+    for row in demand:
+        by_hour.setdefault(row[0].replace(minute=0, second=0, microsecond=0), []).append(row)
+    for hour, batch in by_hour.items():
+        write_bronze(REGIONSUM_TABLE, batch, bronze_path(REGIONSUM_TABLE, hour, bronze))
+
+    registry = tmp_path / "wind_duids.csv"
+    registry.write_text(CURTAIL_REGISTRY)
+    build(silver_dir=silver, bronze_dir=bronze, gold_dir=tmp_path / "gold", registry=registry)
+    return tmp_path / "gold"
+
+
+def test_only_semi_scheduled_output_is_compared_to_availability(curtail_gold):
+    """The assertion that would have caught the Tasmanian impossibility."""
+    df = rows(curtail_gold, "curtailment", "region").set_index("region")
+    # 60 MW metered, not 130: the non-scheduled farm is excluded.
+    assert df.loc["CUR1", "actual_mwh"] == pytest.approx(60.0 * INTERVALS / 12, abs=5e-3)
+    assert df.loc["CUR1", "available_mwh"] == pytest.approx(100.0 * INTERVALS / 12, abs=5e-3)
+    # Admitting the non-scheduled farm would put output above availability and
+    # collapse the gap to zero, so this number only exists if the filter works.
+    assert df.loc["CUR1", "curtailed_mwh"] == pytest.approx(40.0 * INTERVALS / 12, abs=5e-3)
+    assert df.loc["CUR1", "pct_of_available"] == pytest.approx(40.0, abs=5e-4)
+
+
+def test_a_footnote_asterisk_does_not_change_the_classification(curtail_gold):
+    """The live registry carries "Non-Scheduled*" as well as "Non-Scheduled".
+
+    The asterisk is an AEMO footnote marker. Trimming it matters less for
+    excluding non-scheduled units than for the day a "Semi-Scheduled*" appears
+    and silently drops a farm out of the population.
+    """
+    df = rows(curtail_gold, "curtailment", "region")
+    assert len(df) == 1, "CURNS1 carries an asterisk and is still non-scheduled"
 
 
 # --- the runner -----------------------------------------------------------

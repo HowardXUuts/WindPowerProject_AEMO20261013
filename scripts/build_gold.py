@@ -63,6 +63,7 @@ MODELS: Final = (
     Model("output_correlation", ("wind",)),
     Model("farm_correlation", ("wind",)),
     Model("demand_shape", ("wind", "bronze_regionsum")),
+    Model("curtailment", ("wind", "price", "bronze_regionsum", "registry")),
 )
 
 
