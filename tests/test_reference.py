@@ -41,16 +41,29 @@ HEADERS = [
 # fuel source "Wind" because it sits beside the wind farm. Only the technology
 # and dispatch columns give it away.
 ROWS = [
-    ["Acme", "Example Wind Farm", "SA1", "Generator", "Semi-Scheduled", "Wind", "Wind - Onshore", "EXWF1", 150.0],
-    ["Acme", "Example Wind Farm", "SA1", "Generator", "Semi-Scheduled", "Wind", "Wind - Onshore", "EXWF2", 90.5],
-    ["Beta", "Coal Creek", "NSW1", "Generator", "Scheduled", "Black Coal", "Steam Sub Critical", "COAL1", 700.0],
-    ["Gamma", "Sunny Solar", "QLD1", "Generator", "Semi-Scheduled", "Solar", "Photovoltaic", "SOLAR1", 200.0],
-    ["Delta", "Hill Wind", "VIC1", "Generator", "Semi-Scheduled", "Wind - Onshore", "Wind", "HILLWF1", 320.0],
-    ["Epsilon", "Island Wind", "TAS1", "Generator", "Non-Scheduled", "WIND", "Wind - Onshore", "ISLWF1", ""],
-    ["Zeta", "Offshore Trial", "", "Generator", "Semi-Scheduled", "Wind", "Wind - Offshore", "NOREGION1", 50.0],
-    ["Neoen", "Hornsdale Power Reserve", "SA1", "Generator", "Scheduled", "Wind", "Battery", "HPR1", 150.0],
-    ["Eta", "Big Battery", "VIC1", "Load", "Scheduled", "Battery storage", "Battery Storage", "BATT1", 100.0],
-    ["Theta", "New BDU", "NSW1", "Bidirectional", "Scheduled", "Wind", "", "BDU1", 80.0],
+    ["Acme", "Example Wind Farm", "SA1", "Generator", "Semi-Scheduled",
+     "Wind", "Wind - Onshore", "EXWF1", 150.0],
+    ["Acme", "Example Wind Farm", "SA1", "Generator", "Semi-Scheduled",
+     "Wind", "Wind - Onshore", "EXWF2", 90.5],
+    ["Beta", "Coal Creek", "NSW1", "Generator", "Scheduled",
+     "Black Coal", "Steam Sub Critical", "COAL1", 700.0],
+    ["Gamma", "Sunny Solar", "QLD1", "Generator", "Semi-Scheduled",
+     "Solar", "Photovoltaic", "SOLAR1", 200.0],
+    ["Delta", "Hill Wind", "VIC1", "Generator", "Semi-Scheduled",
+     "Wind - Onshore", "Wind", "HILLWF1", 320.0],
+    # Registered wind, dispatchable, but NOT semi-scheduled — so absent from
+    # AEMO's availability forecast. This row is why the unfiltered comparison
+    # showed Tasmanian output above its own availability.
+    ["Epsilon", "Island Wind", "TAS1", "Generator", "Non-Scheduled",
+     "WIND", "Wind - Onshore", "ISLWF1", ""],
+    ["Zeta", "Offshore Trial", "", "Generator", "Semi-Scheduled",
+     "Wind", "Wind - Offshore", "NOREGION1", 50.0],
+    ["Neoen", "Hornsdale Power Reserve", "SA1", "Generator", "Scheduled",
+     "Wind", "Battery", "HPR1", 150.0],
+    ["Eta", "Big Battery", "VIC1", "Load", "Scheduled",
+     "Battery storage", "Battery Storage", "BATT1", 100.0],
+    ["Theta", "New BDU", "NSW1", "Bidirectional", "Scheduled",
+     "Wind", "", "BDU1", 80.0],
 ]
 
 
