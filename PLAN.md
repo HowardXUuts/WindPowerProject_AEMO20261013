@@ -815,15 +815,30 @@ cannot be separated from the population mismatch until the registry is fixed.
 
 ### The fix, in order
 
-1. **Persist the dispatch type.** `scripts/refresh_reference.py` already parses
-   a `dispatch_type` column from the AEMO registry spreadsheet — see the
-   `COLUMN_HINTS` entry for it, which exists because `is_generation()` needs it
-   — but it is not written out. `wind_duids.csv` currently carries only
-   `duid, station_name, region, fuel_type, capacity_mw, in_scada`. Add
-   `dispatch_type` to the written columns. This is the whole of the registry
-   work and it is small.
+**Correction.** An earlier version of this section said the registry already
+parsed the column needed and merely failed to write it. That was wrong, and the
+mistake is worth recording because it is an easy one to repeat:
+`refresh_reference.py` parses **`dispatch_type`**, which holds *Generator /
+Load / Bidirectional* — that is why `is_generation()` consults it to reject
+bidirectional units. The scheduling classification — *Scheduled /
+Semi-Scheduled / Non-Scheduled* — is a **different column**, and it was not
+parsed at all. Two columns, similar names, unrelated meanings.
+
+1. **Parse and persist the scheduling classification.** Done: `schedule_type`
+   is now read via `OPTIONAL_COLUMN_HINTS` and written to `wind_duids.csv`
+   alongside `dispatch_type`. The candidate spellings
+   (`schedule type`, `classification`, `scheduled status`, …) are **unverified
+   against the live file**, because aemo.com.au is unreachable from the
+   development sandbox. A refresh run logs the headers it actually saw when
+   none match, and warns loudly when the column comes back empty, which is how
+   the true spelling gets confirmed.
+
+   **This step needs a human to run the manual `reference.yml` workflow.** The
+   committed `wind_duids.csv` has the new columns only once that runs.
 2. **Filter the comparison** to semi-scheduled DUIDs only, on both sides, then
    re-measure the three regions above. Expect TAS to stop being impossible.
+   Until that re-measurement exists there is no defensible curtailment number,
+   which is the whole reason this section exists rather than a metric.
 3. **Then** build the metric: `greatest(uigf - actual, 0)` per region per
    interval, split by the price in that interval — negative or near-zero price
    means economic, a price above zero with output held down means the

@@ -84,9 +84,42 @@ OPTIONAL_COLUMN_HINTS: Final = {
         "technology type",
     ),
     "dispatch_type": ("dispatch type", "dispatch type - descriptor", "dispatch type descriptor"),
+    # Spellings AEMO has used for the scheduling classification across editions.
+    # Unverified against the live file from this machine, which cannot reach
+    # aemo.com.au; a refresh run reports the headers it actually saw when none
+    # of these match, which is how the real spelling gets confirmed.
+    "schedule_type": (
+        "schedule type",
+        "schedule type - descriptor",
+        "schedule type descriptor",
+        "scheduling type",
+        "scheduled status",
+        "classification",
+    ),
 }
 
-HEADER: Final = ("duid", "station_name", "region", "fuel_type", "capacity_mw", "in_scada")
+HEADER: Final = (
+    "duid", "station_name", "region", "fuel_type", "capacity_mw",
+    # AEMO's dispatch type: Generator, Load or Bidirectional. Kept because it is
+    # why a unit was admitted — is_generation() rejects the last two — and not
+    # because it says anything about scheduling.
+    "dispatch_type",
+    # The scheduling classification: Scheduled, Semi-Scheduled or
+    # Non-Scheduled. This is the column curtailment needs, and it is a
+    # different column from dispatch_type. AEMO's regional wind availability
+    # forecast (SS_WIND_UIGF) covers semi-scheduled units only, while this
+    # registry also holds older farms that are not, so the two cannot be
+    # compared without it: measured unfiltered, Tasmania's actual output reads
+    # *above* its forecast availability, which is impossible for the same units
+    # and is the proof the populations differ. See PLAN.md section 5.
+    #
+    # Both are written verbatim. Classification belongs in SQL, where the
+    # business logic lives; this file stays a faithful copy of what AEMO
+    # published.
+    "schedule_type",
+    "in_scada",
+)
+
 WIND_RE: Final = re.compile(r"wind", re.IGNORECASE)
 
 # Storage and bidirectional units are not generation, whatever their fuel says.
@@ -254,6 +287,7 @@ def extract_wind(payload: bytes) -> WindRows:
 
         technology = cell(row, "technology_type")
         dispatch = cell(row, "dispatch_type")
+        schedule = cell(row, "schedule_type")
         station = " ".join(str(row[mapping["station_name"]]).split())
 
         if not is_generation(fuel, technology, dispatch):
@@ -278,6 +312,11 @@ def extract_wind(payload: bytes) -> WindRows:
             "region": region,
             "fuel_type": " ".join(fuel.split()),
             "capacity_mw": normalise_capacity(row[mapping["capacity_mw"]]),
+            # Blank when this edition of the spreadsheet omits the column, which
+            # older ones do. A blank is honest; guessing "Scheduled" would make
+            # every pre-2010 farm look semi-scheduled to a downstream filter.
+            "dispatch_type": " ".join(dispatch.split()),
+            "schedule_type": " ".join(schedule.split()),
             "in_scada": None,
         }
 
@@ -294,6 +333,16 @@ def extract_wind(payload: bytes) -> WindRows:
         )
     if not records:
         raise RegistryError("no wind rows found; the fuel column may have moved")
+
+    if not any(row["schedule_type"] for row in records.values()):
+        # Not fatal: every other consumer works without it. But curtailment
+        # cannot be computed at all, so say which spellings were tried rather
+        # than leaving a silently empty column.
+        LOG.warning(
+            "no scheduling classification column matched %s - curtailment needs it; "
+            "check the real header and add its spelling to OPTIONAL_COLUMN_HINTS",
+            list(OPTIONAL_COLUMN_HINTS["schedule_type"]),
+        )
 
     LOG.info("found %d wind DUIDs, excluded %d non-generation", len(records), len(excluded))
     return WindRows(
