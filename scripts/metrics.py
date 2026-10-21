@@ -5,6 +5,12 @@ PLAN 4.6 names the metrics and, more usefully, says why each one:
 - **MAE and RMSE, split by whether the window contained a spike.** An overall
   MAE is dominated by the 98% of intervals that are quiet, so a model can look
   excellent while being useless exactly where money is made.
+- **Median absolute error beside the mean.** The tail cuts the other way too.
+  Measured on AEMO's own P5MIN forecast for Queensland: nine rows of 1,854, in
+  which it predicted a market-cap price that never arrived, carry 112 of its
+  123 MAE — the other 1,845 rows average 9.9. Quoting the mean alone calls that
+  forecast useless; quoting the median alone hides that it cried wolf nine
+  times. Both, and the reader can see which.
 - **Brier, not accuracy.** Spikes are rare; a model that always says "no spike"
   scores 98% accuracy and is worth nothing.
 - **Precision-recall AUC, not ROC AUC.** With a 1.8% positive rate ROC flatters
@@ -21,6 +27,7 @@ for the model that actually needs it.
 from __future__ import annotations
 
 import math
+import statistics
 from dataclasses import dataclass
 from typing import Final
 
@@ -34,6 +41,7 @@ class Regression:
 
     n: int
     mae: float
+    medae: float  # the typical error, where mae is the tail-sensitive one
     rmse: float
     bias: float  # mean signed error; a model can be accurate and systematically low
     n_spike: int
@@ -76,6 +84,7 @@ def regression(predicted: list[float], actual: list[float]) -> Regression:
     errors = [p - a for p, a in pairs]
     n = len(errors)
     mae = sum(abs(e) for e in errors) / n
+    medae = statistics.median(abs(e) for e in errors)
     rmse = math.sqrt(sum(e * e for e in errors) / n)
     bias = sum(errors) / n
 
@@ -84,6 +93,7 @@ def regression(predicted: list[float], actual: list[float]) -> Regression:
     return Regression(
         n=n,
         mae=mae,
+        medae=medae,
         rmse=rmse,
         bias=bias,
         n_spike=len(spike),
