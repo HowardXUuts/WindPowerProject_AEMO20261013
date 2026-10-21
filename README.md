@@ -12,6 +12,13 @@ a dashboard and a natural-language Q&A assistant on top of it.
 The whole thing runs on GitHub Actions and stores its data in this repository.
 No cloud account, no database server, no paid services.
 
+**[See the live dashboard →](https://howardxuuts.github.io/WindPowerProject_AEMO20261013/)**
+
+[![The fleet overview, built from the gold layer](docs/screenshot.png)](https://howardxuuts.github.io/WindPowerProject_AEMO20261013/)
+
+It rebuilds itself after every ingest, so the figures above are whatever the
+market was doing when you loaded this page.
+
 ## Architecture
 
 ```mermaid
@@ -110,18 +117,39 @@ This project is not affiliated with AEMO.
 
 ## Status
 
-Bronze is live: both feeds ingest hourly on GitHub Actions and commit Parquet
-back to this repository, one file per closed NEM market hour. The wind DUID
-registry is built from AEMO's registration list and refreshed on demand. Silver
-joins the two into a wind-only, quality-flagged table, one immutable file per
-trading date, and gold turns that into revenue, capture price and a live fleet
-snapshot. A static dashboard on GitHub Pages reads JSON slices exported from
-gold: a fleet overview, and a per-farm page that pairs each farm's output shape
-with its region's price shape. The assistant turns a question into read-only
-SQL over gold and prints the answer with the query that produced it.
+Ingestion is live: seven bronze tables from four NEMWeb reports, written one
+Parquet per closed NEM hour and committed back to this repository. Silver joins
+output to price as a wind-only, quality-flagged table, one immutable file per
+trading date. Gold is rewritten in full each run, and answers rather
+more than "how much did it generate":
 
-See [`PLAN.md`](PLAN.md) for the repository layout, design decisions, and build
-steps.
+| Question | Table |
+|---|---|
+| What did each farm produce and earn? | `farm_daily`, `farm_revenue_daily` |
+| Is wind worth more or less than the average MWh? | `capture_price` |
+| Does wind earn less *because* wind is blowing? | `cannibalisation` |
+| How much of the revenue arrives in how few intervals? | `revenue_concentration` |
+| How long does a negative price actually last? | `negative_price_runs`, `negative_price_worst` |
+| Which farms generate at the same time as each other? | `output_correlation`, `farm_correlation` |
+| Does the wind arrive when demand does? | `demand_shape` |
+| How much available wind did not run, and why? | `curtailment` |
+| What is the fleet doing right now? | `latest_snapshot` |
+| What does a region's output look like hour by hour? | `region_hourly` |
+| Did the checks run, and did they pass? | `quality` |
+
+A static dashboard on GitHub Pages reads JSON slices exported from gold, with a
+per-farm page that pairs each farm's output shape against its region's price
+shape. The assistant turns a question into read-only SQL over gold and prints
+the answer with the query that produced it.
+
+The forecasting phase is built but gated: the feature table, walk-forward folds
+with purge and embargo, the metrics and the battery backtest all exist and are
+tested, and `build_features.py` reports how far off a trainable fold still is.
+It refuses to train on nine days of history, which is the honest answer.
+
+See [`PLAN.md`](PLAN.md) for the repository layout, design decisions and build
+steps, and [`DATA_DICTIONARY.md`](DATA_DICTIONARY.md) for every column of every
+table, generated from the models rather than written by hand.
 
 ## Running it yourself
 
@@ -153,6 +181,13 @@ The assistant needs a model API key only to answer *new* questions. Put one in
 ```bash
 DEEPSEEK_API_KEY=sk-...        # or ASSISTANT_PROVIDER=openai + OPENAI_API_KEY
 ```
+
+## Licence
+
+Code is [MIT](LICENSE). The market data under `data/` is AEMO's, published
+under its
+[copyright permissions](https://aemo.com.au/privacy-and-legal-notices/copyright-permissions),
+and is not covered by that licence.
 
 ## Background
 
