@@ -377,6 +377,10 @@ runs on demand and which writes nothing.
     measured against perfect foresight and a no-forecast threshold rule. ✓
 30. Dashboard panels for forecast error against the baselines, spike
     reliability, and backtest revenue.
+   **These go on their own Forecast page, not onto the existing dashboard,
+   and the track record leads rather than the current forecast — see
+   section 7, which also covers the restructure this is the trigger for.**
+
 
 ## 4. Forecasting and battery arbitrage
 
@@ -931,3 +935,91 @@ outlives the budget by years rather than months.
 A second ML source, a finer grain, or a new unit class in the registry. Each of
 those should be costed with `repo_size.py` before it is merged, not after —
 the report takes a second to run and the alternative is noticing at 900 MB.
+
+## 7. Dashboard information architecture: restructure when the forecast lands
+
+Recorded now because the trigger for acting on it is months away, and by then
+the reasoning will be gone.
+
+### The diagnosis
+
+The dashboard has two pages — "Fleet overview" and "Farm detail" — organised by
+**data grain**: all farms, or one farm. That is how the pipeline thinks. It is
+not how a reader arrives. Nobody opens this asking for fleet-grain things; they
+open it asking *can I build here*, *is my asset underperforming*, or *what is my
+exposure next week*, and those are three different people at a gentailer.
+
+The symptom is countable. Fleet overview carries **21 panels**, because it was
+the only fleet-level page and every metric added since the dashboard review
+went there by default. It is not a section, it is a bucket. Performance,
+structural risk, portfolio construction and pipeline health sit interleaved
+with nothing separating them.
+
+Specific mis-placements, as of the curtailment work:
+
+- *Negative-price exposure* sits among the performance panels and is a risk
+  measure.
+- *Does the wind arrive when demand does* sits between correlation and
+  curtailment, belonging to neither.
+- *Do these farms generate at the same time* answers a portfolio-construction
+  question quite unlike anything around it.
+- *Data quality* is pipeline health rather than analysis and occupies a full
+  panel.
+- *Revenue and capture detail* largely duplicates two panels above it.
+
+### The structure to move to
+
+Organised by the question and named for the reader:
+
+| Section | Reader | Holds |
+|---|---|---|
+| status strip (not a page) | operations | fleet MW now, latest interval, quality dot |
+| **Performance** | asset management | output, capacity factor, revenue, capture price, the farm league table |
+| **Revenue risk** | origination, portfolio | cannibalisation and its solar control, revenue concentration, negative-price runs and the longest events, demand shape, curtailment |
+| **Portfolio** | origination | the regional correlation matrix, and the per-farm most/least correlated lists currently stranded on the farm page |
+| **Farm detail** | asset management | unchanged — it is the one page that already knows who it is for |
+| **Forecast** | trading, dispatch | see below |
+
+Revenue risk is the analytically distinctive part of this project and is
+currently below the fold on a 21-panel page.
+
+**"Fleet overview" is also the wrong name.** To a gentailer "fleet" means *their*
+fleet; this is the whole NEM. "Market" or "National" stops an EnergyAustralia
+reader expecting to see their own assets.
+
+### Where the ML outputs go, and in what order
+
+A **separate Forecast page**, for three reasons that do not apply to anything
+else on the dashboard:
+
+- Everything else is measurement; this is prediction. Shown beside history
+  without error bars and a track record, a forecast is read as fact.
+- Its reader is trading and dispatch, not origination.
+- Its cadence differs: issued continuously, scored after the fact.
+
+The order within the page matters more than the placement:
+
+1. **The track record first** — forecast against actual against the baselines,
+   MAE and MedAE and spike discrimination, per region and per horizon. After
+   `scripts/baselines.py` this is also the interesting content: persistence at
+   MAE 10.61 is a hard bar, and P5MIN at 37.45 looks useless until its PR-AUC
+   of 0.696 against persistence's 0.342 is beside it.
+2. **The current forecast**, with its recent error attached.
+3. **The battery backtest** — dollars, and capture ratio against the
+   perfect-foresight ceiling.
+
+A forecast page that shows predictions above its own accuracy is the fastest
+way to lose a trader's trust. Scorecard first and the page stays credible even
+when the model loses — which PLAN 4.6 already requires be reported plainly.
+
+The backtest arguably answers an origination question rather than a trading
+one, but it is meaningless without the forecast driving it, so it stays here and
+is cross-linked from Portfolio instead.
+
+### Sequencing
+
+**Do not restructure before the forecast exists.** The fifth page is needed then
+anyway, and restructuring earlier moves the same panels twice.
+
+Two things are worth doing before then, and both are small: move *Data quality*
+to a footer strip, and rename *Fleet overview*.
