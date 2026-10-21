@@ -64,8 +64,34 @@ class Readiness:
     reasons: tuple[str, ...]
 
     @property
+    def ready_mean(self) -> bool:
+        """Enough history to train the mean-price model.
+
+        Spikes are irrelevant here. A region can go a season without an interval
+        above $300 and still have a perfectly trainable mean-price model — South
+        Australia and Victoria are both at zero episodes after nine days, and
+        gating their mean model on spikes they may never see would park two of
+        the three large wind regions indefinitely for no reason.
+        """
+        return self.days >= MIN_DAYS
+
+    @property
+    def ready_spike(self) -> bool:
+        """Enough history *and* enough positives to train the spike classifier."""
+        return self.ready_mean and self.spike_episodes >= MIN_SPIKE_EPISODES
+
+    @property
     def ready(self) -> bool:
-        return not self.reasons
+        """Ready for everything. Kept as the strictest reading of the two."""
+        return self.ready_spike
+
+    @property
+    def mean_reasons(self) -> tuple[str, ...]:
+        return tuple(r for r in self.reasons if "days" in r)
+
+    @property
+    def spike_reasons(self) -> tuple[str, ...]:
+        return self.reasons
 
 
 def materialise(
@@ -181,17 +207,34 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     print(f"\n{rows:,} feature rows\n")
-    print(f"  {'region':8} {'days':>5} {'rows':>7} {'spike int':>10} {'episodes':>9}  status")
+    print(f"  {'region':8} {'days':>5} {'rows':>7} {'spike int':>10} {'episodes':>9}  "
+          f"{'mean model':18} spike model")
     for r in state:
-        status = "ready" if r.ready else "; ".join(r.reasons)
+        short_days = f"+{MIN_DAYS - r.days} days"
+        short_eps = f"+{MIN_SPIKE_EPISODES - r.spike_episodes} episodes"
+        mean_status = "ready" if r.ready_mean else short_days
+        if r.ready_spike:
+            spike_status = "ready"
+        elif r.ready_mean:
+            spike_status = short_eps
+        else:
+            spike_status = f"{short_days}, {short_eps}"
         print(f"  {r.region:8} {r.days:>5} {r.rows:>7,} {r.spike_intervals:>10} "
-              f"{r.spike_episodes:>9}  {status}")
+              f"{r.spike_episodes:>9}  {mean_status:18} {spike_status}")
 
-    if not any(r.ready for r in state):
+    # Reported separately because they gate different models and come free at
+    # different times: days arrive on a schedule, spike episodes do not.
+    if not any(r.ready_mean for r in state):
         print(
-            f"\nNo region can be trained yet. A fold needs {MIN_DAYS} days and "
-            f"{MIN_SPIKE_EPISODES} spike episodes;\nthe harness is built and waiting, "
-            "and train_forecast.py will refuse until this passes.",
+            f"\nNo region can train a mean-price model yet: a fold needs {MIN_DAYS} days.",
+            file=sys.stderr,
+        )
+    if not any(r.ready_spike for r in state):
+        print(
+            f"No region can train a spike model yet: that also needs "
+            f"{MIN_SPIKE_EPISODES} spike episodes, and episodes arrive in bursts "
+            "rather than on a schedule.\nThe harness is built and waiting; "
+            "train_forecast.py will refuse until this passes.",
             file=sys.stderr,
         )
     # Not an error: "not enough data yet" is the expected state for months, and
