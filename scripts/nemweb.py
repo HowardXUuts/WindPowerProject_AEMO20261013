@@ -40,7 +40,7 @@ NEM_TZ: Final = timezone(timedelta(hours=10), name="AEST")
 SETTLEMENT_FORMATS: Final = ("%Y/%m/%d %H:%M:%S", "%Y-%m-%d %H:%M:%S")
 
 HTTP_TIMEOUT: Final = httpx.Timeout(30.0, connect=15.0)
-USER_AGENT: Final = "aemo-wind/0.1 (+github.com/HowardXUuts/WindPowerProject_AEMO20261013)"
+USER_AGENT: Final = "aemo-wind/0.1 (+github.com/tiger13tiger/WindPowerProject_AEMO20261013)"
 
 
 class ParseError(Exception):

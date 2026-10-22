@@ -12,9 +12,9 @@ a dashboard and a natural-language Q&A assistant on top of it.
 The whole thing runs on GitHub Actions and stores its data in this repository.
 No cloud account, no database server, no paid services.
 
-**[See the live dashboard →](https://howardxuuts.github.io/WindPowerProject_AEMO20261013/)**
+**[See the live dashboard →](https://tiger13tiger.github.io/WindPowerProject_AEMO20261013/)**
 
-[![The fleet overview, built from the gold layer](docs/screenshot.png)](https://howardxuuts.github.io/WindPowerProject_AEMO20261013/)
+[![The fleet overview, built from the gold layer](docs/screenshot.png)](https://tiger13tiger.github.io/WindPowerProject_AEMO20261013/)
 
 It rebuilds itself after every ingest, so the figures above are whatever the
 market was doing when you loaded this page.

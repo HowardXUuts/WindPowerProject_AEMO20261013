@@ -127,7 +127,7 @@ NOT_GENERATION_RE: Final = re.compile(
     r"batter|bess|storage|bi-?directional|pump|load", re.IGNORECASE
 )
 HTTP_TIMEOUT: Final = httpx.Timeout(120.0, connect=30.0)
-USER_AGENT: Final = "aemo-wind/0.1 (+github.com/HowardXUuts/WindPowerProject_AEMO20261013)"
+USER_AGENT: Final = "aemo-wind/0.1 (+github.com/tiger13tiger/WindPowerProject_AEMO20261013)"
 
 
 class RegistryError(Exception):
